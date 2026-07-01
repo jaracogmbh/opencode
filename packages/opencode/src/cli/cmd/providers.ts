@@ -1,5 +1,6 @@
 import type { Argv } from "yargs"
 import { Auth } from "../../auth"
+import { KeycloakAuth } from "@/auth/keycloak"
 import { cmd } from "./cmd"
 import { CliError, effectCmd, fail } from "../effect-cmd"
 import { UI } from "../ui"
@@ -17,6 +18,7 @@ import { Process } from "@/util/process"
 import { errorMessage } from "@/util/error"
 import { text } from "node:stream/consumers"
 import { Effect, Option } from "effect"
+import open from "open"
 
 type PluginAuth = NonNullable<Hooks["auth"]>
 
@@ -35,6 +37,80 @@ const cliTry = <Value>(message: string, fn: () => PromiseLike<Value>) =>
     try: fn,
     catch: (error) => new CliError({ message: message + errorMessage(error) }),
   })
+
+const KEYCLOAK_SCOPE = "openid profile email offline_access"
+const KEYCLOAK_REDIRECT_URI = "http://127.0.0.1:19877"
+
+function isKeycloakLogin(args: { url?: string; provider?: string }) {
+  return args.url === "keycloak" || args.provider === "keycloak"
+}
+
+const keycloakLogin = Effect.fn("Cli.providers.keycloakLogin")(function* () {
+  const keycloak = yield* KeycloakAuth.Service
+
+  const issuer = yield* promptValue(
+    yield* Prompt.text({
+      message: "Keycloak issuer URL",
+      placeholder: "https://sso.example.com/realms/my-realm",
+      validate: (value) => (value && URL.canParse(value) ? undefined : "Enter a valid URL"),
+    }),
+  )
+  const clientId = yield* promptValue(
+    yield* Prompt.text({
+      message: "Keycloak client ID",
+      placeholder: "opencode-cli",
+      validate: (value) => (value && value.length > 0 ? undefined : "Required"),
+    }),
+  )
+  const scopeInput = yield* promptValue(
+    yield* Prompt.text({
+      message: "Scopes",
+      placeholder: KEYCLOAK_SCOPE,
+    }),
+  )
+  const clientSecretInput = yield* promptValue(
+    yield* Prompt.password({
+      message: "Client secret (optional)",
+    }),
+  )
+  const redirectUriInput = yield* promptValue(
+    yield* Prompt.text({
+      message: "Redirect URI",
+      placeholder: KEYCLOAK_REDIRECT_URI,
+      validate: (value) => (!value || URL.canParse(value) ? undefined : "Enter a valid URL"),
+    }),
+  )
+
+  const scope = scopeInput.trim() || KEYCLOAK_SCOPE
+  const clientSecret = clientSecretInput.trim() || undefined
+  const redirectUri = redirectUriInput.trim() || KEYCLOAK_REDIRECT_URI
+  const spinner = Prompt.spinner()
+  yield* spinner.start("Starting Keycloak login...")
+
+  let authorizationUrl: string | undefined
+  yield* keycloak
+    .login(
+      new KeycloakAuth.LoginInput({
+        issuer,
+        clientId,
+        clientSecret,
+        scope,
+        redirectUri,
+      }),
+      (url) => {
+        authorizationUrl = url
+        UI.println(`Open this URL to authorize: ${url}`)
+        void open(url).catch(() => undefined)
+      },
+    )
+    .pipe(Effect.mapError((error) => new CliError({ message: error.message })))
+
+  yield* spinner.stop("Login successful")
+  if (!authorizationUrl) {
+    yield* Prompt.log.warn("Login completed without reporting an authorization URL")
+  }
+  yield* Prompt.outro("Done")
+})
 
 const handlePluginAuth = Effect.fn("Cli.providers.pluginAuth")(function* (
   plugin: { auth: PluginAuth },
@@ -261,14 +337,28 @@ export const ProvidersListCommand = effectCmd({
     const displayPath = authPath.startsWith(homedir) ? authPath.replace(homedir, "~") : authPath
     yield* Prompt.intro(`Credentials ${UI.Style.TEXT_DIM}${displayPath}`)
     const results = Object.entries(yield* Effect.orDie(authSvc.all()))
+    const identities = results.filter(([, result]) => result.type === "keycloak")
+    const credentials = results.filter(([, result]) => result.type !== "keycloak")
     const database = yield* modelsDev.get()
 
-    for (const [providerID, result] of results) {
+    for (const [providerID, result] of credentials) {
       const name = database[providerID]?.name || providerID
       yield* Prompt.log.info(`${name} ${UI.Style.TEXT_DIM}${result.type}`)
     }
 
-    yield* Prompt.outro(`${results.length} credentials`)
+    yield* Prompt.outro(`${credentials.length} credentials`)
+
+    if (identities.length > 0) {
+      UI.empty()
+      yield* Prompt.intro("Identity")
+      for (const [, result] of identities) {
+        if (result.type !== "keycloak") continue
+        const identity = KeycloakAuth.identityFromEntry(result)
+        const name = identity.username ? ` ${identity.username}` : ""
+        yield* Prompt.log.info(`Keycloak${name} ${UI.Style.TEXT_DIM}${identity.status}`)
+      }
+      yield* Prompt.outro(identities.length === 1 ? "1 identity" : `${identities.length} identities`)
+    }
 
     const activeEnvVars: Array<{ provider: string; envVar: string }> = []
 
@@ -300,7 +390,7 @@ export const ProvidersLoginCommand = effectCmd({
   command: "login [url]",
   describe: "log in to a provider",
   // URL login skips instance bootstrap, which would load remote config with the stale token and crash before re-auth.
-  instance: (args) => !args.url,
+  instance: (args) => !args.url && args.provider !== "keycloak",
   builder: (yargs: Argv) =>
     yargs
       .positional("url", {
@@ -322,6 +412,11 @@ export const ProvidersLoginCommand = effectCmd({
 
     UI.empty()
     yield* Prompt.intro("Add credential")
+    if (isKeycloakLogin(args)) {
+      yield* keycloakLogin()
+      return
+    }
+
     if (args.url) {
       const url = args.url.replace(/\/+$/, "")
       const wellknown = (yield* cliTry(`Failed to load auth provider metadata from ${url}: `, () =>
@@ -500,11 +595,18 @@ export const ProvidersLogoutCommand = effectCmd({
   instance: false,
   handler: Effect.fn("Cli.providers.logout")(function* (args) {
     const authSvc = yield* Auth.Service
+    const keycloak = yield* KeycloakAuth.Service
     const modelsDev = yield* ModelsDev.Service
 
     UI.empty()
-    const credentials: Array<[string, Auth.Info]> = Object.entries(yield* Effect.orDie(authSvc.all()))
     yield* Prompt.intro("Remove credential")
+    if (args.provider?.toLowerCase() === "keycloak") {
+      yield* keycloak.logout()
+      yield* Prompt.outro("Logout successful")
+      return
+    }
+
+    const credentials: Array<[string, Auth.Info]> = Object.entries(yield* Effect.orDie(authSvc.all()))
     if (credentials.length === 0) {
       yield* Prompt.log.error("No credentials found")
       return
@@ -528,6 +630,11 @@ export const ProvidersLogoutCommand = effectCmd({
           }),
         )
     if (!provider) return yield* fail(`Unknown configured provider "${args.provider}"`)
+    if (provider === "keycloak") {
+      yield* keycloak.logout()
+      yield* Prompt.outro("Logout successful")
+      return
+    }
     yield* Effect.orDie(authSvc.remove(provider))
     yield* Prompt.outro("Logout successful")
   }),

@@ -63,6 +63,8 @@ let clientCreateCount = 0
 let transportCloseCount = 0
 // Captures the opts passed to each MockStdioTransport, keyed by lastCreatedClientName
 const stdioOptsByName = new Map<string, any>()
+const streamableHttpOptsByName = new Map<string, any>()
+const sseOptsByName = new Map<string, any>()
 
 function getOrCreateClientState(name?: string): MockClientState {
   const key = name ?? "default"
@@ -115,7 +117,9 @@ class MockStdioTransport {
 
 class MockStreamableHTTP {
   // oxlint-disable-next-line no-useless-constructor
-  constructor(_url: URL, _opts?: any) {}
+  constructor(_url: URL, opts?: any) {
+    if (lastCreatedClientName) streamableHttpOptsByName.set(lastCreatedClientName, opts)
+  }
   async start() {
     if (connectShouldHang) return new Promise<void>(() => {}) // never resolves
     if (connectShouldFail) throw new Error(connectError)
@@ -128,7 +132,9 @@ class MockStreamableHTTP {
 
 class MockSSE {
   // oxlint-disable-next-line no-useless-constructor
-  constructor(_url: URL, _opts?: any) {}
+  constructor(_url: URL, opts?: any) {
+    if (lastCreatedClientName) sseOptsByName.set(lastCreatedClientName, opts)
+  }
   async start() {
     if (connectShouldHang) return new Promise<void>(() => {}) // never resolves
     if (connectShouldFail) throw new Error(connectError)
@@ -270,6 +276,10 @@ beforeEach(() => {
   connectError = "Mock transport cannot connect"
   clientCreateCount = 0
   transportCloseCount = 0
+  stdioOptsByName.clear()
+  streamableHttpOptsByName.clear()
+  sseOptsByName.clear()
+  delete process.env.OPENCODE_AUTH_CONTENT
 })
 
 // Import after mocks
@@ -314,6 +324,63 @@ it.instance(
         lastCreatedClientName = "rel-cwd"
         yield* mcp.add("rel-cwd", { type: "local", command: ["echo", "test"], cwd: "plugins/sub" })
         expect(stdioOptsByName.get("rel-cwd")?.cwd).toBe(path.resolve(directory, "plugins/sub"))
+      }),
+    ),
+  { config: { mcp: {} } },
+)
+
+it.instance(
+  "remote mcp injects Keycloak bearer headers",
+  () =>
+    MCP.Service.use((mcp: MCPNS.Interface) =>
+      Effect.gen(function* () {
+        process.env.OPENCODE_AUTH_CONTENT = JSON.stringify({
+          keycloak: {
+            type: "keycloak",
+            issuer: "https://sso.example.com/realms/engineering",
+            clientId: "opencode-cli",
+            access: "kc-access-token",
+            refresh: "kc-refresh-token",
+            expires: Date.now() + 5 * 60_000,
+            scope: "openid profile email offline_access",
+          },
+        })
+        lastCreatedClientName = "remote-keycloak"
+
+        const result = yield* mcp.add("remote-keycloak", {
+          type: "remote",
+          url: "https://mcp.example.com",
+          headers: { "X-Static": "present", Authorization: "Bearer stale" },
+          auth: { type: "bearer", provider: "keycloak" },
+        })
+
+        expect((result.status as any)["remote-keycloak"]?.status ?? (result.status as any).status).toBe("connected")
+        expect(streamableHttpOptsByName.get("remote-keycloak")?.requestInit?.headers).toEqual({
+          "X-Static": "present",
+          Authorization: "Bearer kc-access-token",
+        })
+      }),
+    ),
+  { config: { mcp: {} } },
+)
+
+it.instance(
+  "remote mcp requiring Keycloak reports needs_auth without a login",
+  () =>
+    MCP.Service.use((mcp: MCPNS.Interface) =>
+      Effect.gen(function* () {
+        lastCreatedClientName = "remote-keycloak-missing"
+
+        const result = yield* mcp.add("remote-keycloak-missing", {
+          type: "remote",
+          url: "https://mcp.example.com",
+          auth: { type: "bearer", provider: "keycloak" },
+        })
+
+        expect((result.status as any)["remote-keycloak-missing"]?.status ?? (result.status as any).status).toBe(
+          "needs_auth",
+        )
+        expect(streamableHttpOptsByName.get("remote-keycloak-missing")).toBeUndefined()
       }),
     ),
   { config: { mcp: {} } },

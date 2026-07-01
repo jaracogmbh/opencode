@@ -16,7 +16,7 @@ import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { MessageID } from "@/session/schema"
 import { createRunDemo } from "./demo"
-import { resolveModelInfo, resolveRunTuiConfig, resolveSessionInfo } from "./runtime.boot"
+import { resolveAuthInfo, resolveModelInfo, resolveRunTuiConfig, resolveSessionInfo } from "./runtime.boot"
 import { createRuntimeLifecycle } from "./runtime.lifecycle"
 import { trace } from "./trace"
 import { cycleVariant, formatModelLabel, resolveSavedVariant, resolveVariant, saveVariant } from "./variant.shared"
@@ -155,6 +155,13 @@ function variantsFor(providers: RunProvider[], model: RunInput["model"]) {
 const RESIZE_DELAY = 250
 const LOCAL_REPLAY_ROW_LIMIT = 100
 
+function emptyIdentity() {
+  return {
+    provider: "keycloak" as const,
+    status: "not_authenticated" as const,
+  }
+}
+
 async function resolveExitTitle(
   ctx: BootContext,
   input: RunRuntimeInput,
@@ -184,6 +191,7 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
   const tuiConfigTask = resolveRunTuiConfig()
   const ctx = await input.boot()
   const modelTask = resolveModelInfo(ctx.sdk, ctx.directory, ctx.model)
+  const authTask = resolveAuthInfo()
   const sessionTask =
     ctx.resume === true
       ? resolveSessionInfo(ctx.sdk, ctx.sessionID, ctx.model)
@@ -191,9 +199,15 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
           first: true,
           history: [],
           variant: undefined,
+          identity: emptyIdentity(),
         })
   const savedTask = resolveSavedVariant(ctx.model)
-  const [tuiConfig, session, savedVariant] = await Promise.all([tuiConfigTask, sessionTask, savedTask])
+  const [tuiConfig, authInfo, session, savedVariant] = await Promise.all([
+    tuiConfigTask,
+    authTask,
+    sessionTask,
+    savedTask,
+  ])
   const state: RuntimeState = {
     shown: !session.first,
     aborting: false,
@@ -227,6 +241,7 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
 
   const shell = await (deps.createRuntimeLifecycle ?? createRuntimeLifecycle)({
     directory: ctx.directory,
+    sdk: ctx.sdk,
     findFiles: (query) =>
       ctx.sdk.find
         .files({ query, directory: ctx.directory })
@@ -239,6 +254,7 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
     getSessionID: () => state.sessionID,
     first: session.first,
     history: session.history,
+    identity: session.identity.status === "not_authenticated" ? authInfo.identity : session.identity,
     agent: state.agent,
     model: state.model,
     variant: state.activeVariant,

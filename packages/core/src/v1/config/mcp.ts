@@ -41,6 +41,12 @@ export const OAuth = Schema.Struct({
 }).annotate({ identifier: "McpOAuthConfig" })
 export type OAuth = Schema.Schema.Type<typeof OAuth>
 
+export const AuthBearer = Schema.Struct({
+  type: Schema.Literal("bearer").annotate({ description: "Use a runtime bearer token source" }),
+  provider: Schema.Literal("keycloak").annotate({ description: "Global auth provider that supplies the bearer token" }),
+}).annotate({ identifier: "McpAuthBearerConfig" })
+export type AuthBearer = Schema.Schema.Type<typeof AuthBearer>
+
 export const Remote = Schema.Struct({
   type: Schema.Literal("remote").annotate({ description: "Type of MCP server connection" }),
   url: Schema.String.annotate({ description: "URL of the remote MCP server" }),
@@ -49,6 +55,9 @@ export const Remote = Schema.Struct({
   }),
   headers: Schema.optional(Schema.Record(Schema.String, Schema.String)).annotate({
     description: "Headers to send with the request",
+  }),
+  auth: Schema.optional(AuthBearer).annotate({
+    description: "Runtime authentication source for remote MCP requests.",
   }),
   oauth: Schema.optional(Schema.Union([OAuth, Schema.Literal(false)])).annotate({
     description: "OAuth authentication configuration for the MCP server. Set to false to disable OAuth auto-detection.",

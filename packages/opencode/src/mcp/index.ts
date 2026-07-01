@@ -22,6 +22,7 @@ import { NamedError } from "@opencode-ai/core/util/error"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { withTimeout } from "@/util/timeout"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { KeycloakAuth } from "@/auth/keycloak"
 import { McpOAuthPendingProvider, McpOAuthProvider, OAUTH_CALLBACK_PATH } from "./oauth-provider"
 import { McpOAuthCallback } from "./oauth-callback"
 import { McpAuth } from "./auth"
@@ -199,6 +200,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const auth = yield* McpAuth.Service
+    const keycloakAuth = yield* KeycloakAuth.Service
     const events = yield* EventV2Bridge.Service
 
     type Transport = StdioClientTransport | StreamableHTTPClientTransport | SSEClientTransport
@@ -225,6 +227,29 @@ const layer = Layer.effect(
 
     const DISABLED_RESULT: CreateResult = { status: { status: "disabled" } }
 
+    const resolveRemoteHeaders = Effect.fn("MCP.resolveRemoteHeaders")(function* (
+      mcp: ConfigMCPV1.Info & { type: "remote" },
+    ) {
+      const headers = mcp.headers ? { ...mcp.headers } : {}
+      if (mcp.auth?.type !== "bearer" || mcp.auth.provider !== "keycloak") {
+        return { headers: Object.keys(headers).length ? headers : undefined, status: undefined as Status | undefined }
+      }
+
+      const tokenResult = yield* keycloakAuth.token().pipe(
+        Effect.map((token) => ({ token, status: undefined as Status | undefined })),
+        Effect.catch((error) =>
+          Effect.succeed({ token: undefined as string | undefined, status: { status: "failed", error: error.message } as Status }),
+        ),
+      )
+
+      if (tokenResult.status) return { headers: undefined, status: tokenResult.status }
+      if (!tokenResult.token) return { headers: undefined, status: { status: "needs_auth" } as Status }
+      return {
+        headers: { ...headers, Authorization: `Bearer ${tokenResult.token}` },
+        status: undefined as Status | undefined,
+      }
+    })
+
     const connectRemote = Effect.fn("MCP.connectRemote")(function* (
       key: string,
       mcp: ConfigMCPV1.Info & { type: "remote" },
@@ -236,6 +261,13 @@ const layer = Layer.effect(
         return {
           client: undefined as MCPClient | undefined,
           status: { status: "failed" as const, error: `Invalid MCP URL for "${key}"` },
+        }
+      }
+      const remoteHeaders = yield* resolveRemoteHeaders(mcp)
+      if (remoteHeaders.status) {
+        return {
+          client: undefined as MCPClient | undefined,
+          status: remoteHeaders.status,
         }
       }
       let authProvider: McpOAuthProvider | undefined
@@ -263,14 +295,14 @@ const layer = Layer.effect(
           name: "StreamableHTTP",
           transport: new StreamableHTTPClientTransport(url, {
             authProvider,
-            requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
+            requestInit: remoteHeaders.headers ? { headers: remoteHeaders.headers } : undefined,
           }),
         },
         {
           name: "SSE",
           transport: new SSEClientTransport(url, {
             authProvider,
-            requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
+            requestInit: remoteHeaders.headers ? { headers: remoteHeaders.headers } : undefined,
           }),
         },
       ]
@@ -1006,7 +1038,7 @@ export type AuthStatus = "authenticated" | "expired" | "not_authenticated"
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [CrossSpawnSpawner.node, McpAuth.node, EventV2Bridge.node, Config.node],
+  deps: [CrossSpawnSpawner.node, McpAuth.node, KeycloakAuth.node, EventV2Bridge.node, Config.node],
 })
 
 export * as MCP from "."

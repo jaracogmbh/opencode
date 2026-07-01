@@ -7,6 +7,7 @@ import * as Observability from "@opencode-ai/core/observability"
 import { Account } from "@/account/account"
 import { Agent } from "@/agent/agent"
 import { Auth } from "@/auth"
+import { KeycloakAuth } from "@/auth/keycloak"
 import { BackgroundJob } from "@/background/job"
 import { Command } from "@/command"
 import { Config } from "@/config/config"
@@ -88,6 +89,7 @@ import { controlPlaneHandlers } from "./handlers/control-plane"
 import { experimentalHandlers } from "./handlers/experimental"
 import { fileHandlers } from "./handlers/file"
 import { globalHandlers } from "./handlers/global"
+import { identityHandlers } from "./handlers/identity"
 import { instanceHandlers } from "./handlers/instance"
 import { mcpHandlers } from "./handlers/mcp"
 import { permissionHandlers } from "./handlers/permission"
@@ -156,6 +158,7 @@ const instanceApiRoutes = HttpApiBuilder.layer(InstanceHttpApi).pipe(
     configHandlers,
     experimentalHandlers,
     fileHandlers,
+    identityHandlers,
     instanceHandlers,
     mcpHandlers,
     projectHandlers,
@@ -214,6 +217,7 @@ const app = LayerNode.group([
   FSUtil.node,
   Database.node,
   Auth.node,
+  KeycloakAuth.node,
   Account.node,
   Config.node,
   Env.node,

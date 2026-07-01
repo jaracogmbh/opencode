@@ -5,7 +5,7 @@ import fuzzysort from "fuzzysort"
 import { createEffect, createMemo, createSignal, type Accessor } from "solid-js"
 import { RunFooterMenu, createFooterMenuState, type RunFooterMenuItem } from "./footer.menu"
 import type { RunFooterTheme } from "./theme"
-import type { FooterQueuedPrompt, FooterSubagentTab, RunCommand, RunInput, RunProvider } from "./types"
+import type { FooterQueuedPrompt, FooterSubagentTab, RunCommand, RunIdentity, RunInput, RunProvider } from "./types"
 
 type PanelEntry = RunFooterMenuItem & {
   category: string
@@ -15,6 +15,7 @@ type PanelEntry = RunFooterMenuItem & {
 type CommandEntry =
   | (PanelEntry & { action: "model" })
   | (PanelEntry & { action: "editor" })
+  | (PanelEntry & { action: "identity" })
   | (PanelEntry & { action: "skill" })
   | (PanelEntry & { action: "queued" })
   | (PanelEntry & { action: "subagent" })
@@ -46,6 +47,10 @@ type SubagentEntry = PanelEntry & {
 
 type QueuedEntry = PanelEntry & {
   prompt: FooterQueuedPrompt
+}
+
+type IdentityEntry = PanelEntry & {
+  action: "status" | "refresh" | "login" | "logout"
 }
 
 type MenuState = ReturnType<typeof createFooterMenuState>
@@ -122,6 +127,42 @@ function subagentStatusLabel(status: FooterSubagentTab["status"]) {
   }
 
   return "running"
+}
+
+function identityLabel(identity: RunIdentity) {
+  if (identity.status === "not_authenticated") {
+    return "Not logged in"
+  }
+
+  return identity.username ?? identity.clientId ?? identity.issuer ?? "Keycloak"
+}
+
+function identityStatusLabel(identity: RunIdentity) {
+  if (identity.status === "authenticated") {
+    return `logged in as ${identityLabel(identity)}`
+  }
+
+  if (identity.status === "expired") {
+    return `identity expired for ${identityLabel(identity)}`
+  }
+
+  return "not logged in"
+}
+
+function sdkErrorMessage(error: unknown) {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "data" in error &&
+    typeof error.data === "object" &&
+    error.data !== null &&
+    "message" in error.data &&
+    typeof error.data.message === "string"
+  ) {
+    return error.data.message
+  }
+
+  return error instanceof Error ? error.message : String(error)
 }
 
 function handleKey(input: {
@@ -341,6 +382,7 @@ export function RunCommandMenuBody(props: {
   onClose: () => void
   onModel: () => void
   onEditor: () => void
+  onIdentity: () => void
   onSkill: () => void
   onSubagent: () => void
   onQueued: () => void
@@ -463,6 +505,13 @@ export function RunCommandMenuBody(props: {
       ...prompt,
       ...agent,
       ...commands,
+      {
+        action: "identity",
+        category: "System",
+        display: "Identity",
+        footer: "/identity",
+        keywords: "/identity identity keycloak sso login logout status",
+      },
       { action: "exit", category: "System", display: "Exit", footer: "/exit", keywords: "/exit exit" },
     ]
   })
@@ -476,6 +525,11 @@ export function RunCommandMenuBody(props: {
 
     if (item.action === "editor") {
       props.onEditor()
+      return
+    }
+
+    if (item.action === "identity") {
+      props.onIdentity()
       return
     }
 
@@ -562,6 +616,162 @@ export function RunCommandMenuBody(props: {
         rows={() => PANEL_LIST_ROWS}
         limit={PANEL_LIST_ROWS}
         empty="No results found"
+        border={false}
+        paddingLeft={PANEL_PAD}
+        paddingRight={PANEL_PAD}
+        grouped={!query().trim()}
+        background
+        headerColor={props.theme().muted}
+      />
+    </PanelShell>
+  )
+}
+
+export function RunIdentityMenuBody(props: {
+  theme: Accessor<RunFooterTheme>
+  sdk: RunInput["sdk"]
+  identity: Accessor<RunIdentity>
+  onClose: () => void
+  onIdentity: (identity: RunIdentity) => void
+  onStatus: (text: string) => void
+}) {
+  let field: InputRenderable | undefined
+  const [query, setQuery] = createSignal("")
+  const entries = createMemo<IdentityEntry[]>(() => {
+    const identity = props.identity()
+    const loggedIn = identity.status !== "not_authenticated"
+    return [
+      {
+        action: "status",
+        category: "Status",
+        display: identityLabel(identity),
+        description: identityStatusLabel(identity),
+        footer:
+          identity.status === "authenticated" ? "active" : identity.status === "expired" ? "expired" : "logged out",
+        keywords: `status keycloak sso ${identityLabel(identity)}`,
+      },
+      {
+        action: "refresh",
+        category: "Actions",
+        display: "Refresh status",
+        keywords: "refresh status keycloak sso identity",
+      },
+      {
+        action: "login",
+        category: "Actions",
+        display: loggedIn ? "Log in again" : "Log in",
+        footer: "CLI",
+        keywords: "login keycloak sso identity auth",
+      },
+      ...(loggedIn
+        ? [
+            {
+              action: "logout" as const,
+              category: "Actions",
+              display: "Log out",
+              footer: identityLabel(identity),
+              keywords: "logout keycloak sso identity auth",
+            },
+          ]
+        : []),
+    ]
+  })
+  const items = createMemo<IdentityEntry[]>(() => match(query(), entries()))
+  const menu = createFooterMenuState({ count: () => items().length, limit: PANEL_LIST_ROWS })
+
+  const refresh = () => {
+    void props.sdk.identity.keycloak
+      .status()
+      .then((result) => {
+        if (result.data) {
+          props.onIdentity(result.data)
+          props.onStatus(identityStatusLabel(result.data))
+          return
+        }
+
+        props.onStatus(result.error ? sdkErrorMessage(result.error) : "failed to refresh identity")
+      })
+      .catch((error) => props.onStatus(sdkErrorMessage(error)))
+  }
+
+  const logout = () => {
+    void props.sdk.identity.keycloak
+      .logout()
+      .then((result) => {
+        if (result.data) {
+          props.onIdentity(result.data)
+          props.onStatus("logged out")
+          props.onClose()
+          return
+        }
+
+        props.onStatus(result.error ? sdkErrorMessage(result.error) : "logout failed")
+      })
+      .catch((error) => props.onStatus(sdkErrorMessage(error)))
+  }
+
+  const pick = (item: IdentityEntry) => {
+    if (item.action === "status") {
+      props.onStatus(identityStatusLabel(props.identity()))
+      return
+    }
+
+    if (item.action === "refresh") {
+      refresh()
+      return
+    }
+
+    if (item.action === "logout") {
+      logout()
+      return
+    }
+
+    props.onStatus("run opencode auth login keycloak")
+    props.onClose()
+  }
+
+  const select = () => {
+    const item = items()[menu.selected()]
+    if (item) pick(item)
+  }
+
+  createEffect(() => {
+    query()
+    menu.reset()
+  })
+
+  useKeyboard((event) => {
+    if (event.defaultPrevented) {
+      return
+    }
+
+    handleKey({ event, menu, field: () => field, setQuery, select, close: props.onClose })
+  })
+
+  return (
+    <PanelShell
+      title="Identity"
+      countVisible={false}
+      query={query()}
+      count={items().length}
+      total={entries().length}
+      placeholder="Search"
+      theme={props.theme}
+      inputRef={(input) => {
+        field = input
+      }}
+      onQuery={setQuery}
+      dark
+      chrome="minimal"
+    >
+      <RunFooterMenu
+        theme={props.theme}
+        items={items}
+        selected={menu.selected}
+        offset={menu.offset}
+        rows={() => PANEL_LIST_ROWS}
+        limit={PANEL_LIST_ROWS}
+        empty="No identity actions"
         border={false}
         paddingLeft={PANEL_PAD}
         paddingRight={PANEL_PAD}

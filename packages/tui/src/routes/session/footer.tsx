@@ -12,6 +12,8 @@ export function Footer() {
   const route = useRoute()
   const mcp = createMemo(() => Object.values(sync.data.mcp).filter((x) => x.status === "connected").length)
   const mcpError = createMemo(() => Object.values(sync.data.mcp).some((x) => x.status === "failed"))
+  const identity = createMemo(() => sync.data.identity)
+  const identityLabel = createMemo(() => identity().username ?? identity().clientId ?? "Keycloak")
   const lsp = createMemo(() => Object.keys(sync.data.lsp))
   const permissions = createMemo(() => {
     if (route.data.type !== "session") return []
@@ -64,6 +66,19 @@ export function Footer() {
               <text fg={theme.warning}>
                 <span style={{ fg: theme.warning }}>△</span> {permissions().length} Permission
                 {permissions().length > 1 ? "s" : ""}
+              </text>
+            </Show>
+            <Show when={identity().status !== "not_authenticated"}>
+              <text fg={theme.text}>
+                <Switch>
+                  <Match when={identity().status === "authenticated"}>
+                    <span style={{ fg: theme.success }}>● </span>
+                  </Match>
+                  <Match when={true}>
+                    <span style={{ fg: theme.warning }}>△ </span>
+                  </Match>
+                </Switch>
+                {identityLabel()}
               </text>
             </Show>
             <text fg={theme.text}>

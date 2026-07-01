@@ -15,6 +15,7 @@ import { createColors, createFrames } from "@opencode-ai/tui/ui/spinner"
 import {
   RUN_SUBAGENT_PANEL_ROWS,
   RunCommandMenuBody,
+  RunIdentityMenuBody,
   RunModelSelectBody,
   RunQueuedPromptSelectBody,
   RunSkillSelectBody,
@@ -72,6 +73,7 @@ const EMPTY_BORDER = {
 
 type RunFooterViewProps = {
   directory: string
+  sdk: RunInput["sdk"]
   findFiles: (query: string) => Promise<string[]>
   agents: () => RunAgent[]
   resources: () => RunResource[]
@@ -107,6 +109,7 @@ type RunFooterViewProps = {
   onRows: (rows: number) => void
   onLayout: (input: { route: FooterPromptRoute; autocomplete: boolean; subagentRows: number }) => void
   onStatus: (text: string) => void
+  onIdentity: (identity: FooterState["identity"]) => void
   onSubagentSelect?: (sessionID: string | undefined) => void
   onQueuedRemove: (messageID: string) => Promise<boolean>
 }
@@ -138,6 +141,7 @@ export function RunFooterView(props: RunFooterViewProps) {
   const inspecting = createMemo(() => active().type === "prompt" && route().type === "subagent")
   const commanding = createMemo(() => active().type === "prompt" && route().type === "command")
   const skilling = createMemo(() => active().type === "prompt" && route().type === "skill")
+  const identitying = createMemo(() => active().type === "prompt" && route().type === "identity")
   const modeling = createMemo(() => active().type === "prompt" && route().type === "model")
   const varianting = createMemo(() => active().type === "prompt" && route().type === "variant")
   const panel = createMemo(
@@ -148,6 +152,7 @@ export function RunFooterView(props: RunFooterViewProps) {
       selectingSubagent() ||
       commanding() ||
       skilling() ||
+      identitying() ||
       modeling() ||
       varianting(),
   )
@@ -242,6 +247,8 @@ export function RunFooterView(props: RunFooterViewProps) {
   const exiting = createMemo(() => props.state().exit > 0)
   const queue = createMemo(() => props.state().queue)
   const usage = createMemo(() => props.state().usage)
+  const identity = createMemo(() => props.state().identity)
+  const identityLabel = createMemo(() => identity().username ?? identity().clientId ?? "Keycloak")
   const interruptLabel = createMemo(() => {
     if (!interrupt()) {
       return
@@ -301,6 +308,11 @@ export function RunFooterView(props: RunFooterViewProps) {
     }
 
     setRoute({ type: "skill" })
+    props.onSubagentSelect?.(undefined)
+  }
+
+  const openIdentity = () => {
+    setRoute({ type: "identity" })
     props.onSubagentSelect?.(undefined)
   }
 
@@ -375,6 +387,7 @@ export function RunFooterView(props: RunFooterViewProps) {
     onExitRequest: props.onExitRequest,
     onExit: props.onExit,
     onSkillMenu: openSkillMenu,
+    onIdentityMenu: openIdentity,
     onRows: props.onRows,
     onStatus: props.onStatus,
   })
@@ -452,25 +465,25 @@ export function RunFooterView(props: RunFooterViewProps) {
   const statuslineBackground = createMemo(() => theme().status)
   const hasActivityMeta = createMemo(() => activityMeta().length > 0)
   const hasModelStatus = createMemo(() => responsive().statusline.showModel && Boolean(modelStatus()))
-  const contextHints = createMemo(() => {
-    if (!prompt() || shell() || !responsive().statusline.showContextHints) {
-      return []
-    }
+   const contextHints = createMemo(() => {
+     if (!prompt() || shell() || !responsive().statusline.showContextHints) {
+       return []
+     }
 
-    const items: Array<{ kind: string; key: string; label: string }> = []
-    if (foregroundSubagents() && backgroundShortcut()) {
-      items.push({ kind: "background", key: backgroundShortcut(), label: "background" })
-    }
-    if (queuedPrompts().length > 0 && queuedShortcut()) {
-      items.push({ kind: "queued", key: queuedShortcut(), label: `${queue()} queued` })
-    }
-    if (activeTabs().length > 0 && subagentShortcut()) {
-      items.push({ kind: "subagents", key: subagentShortcut(), label: "subagents" })
-    }
+     const items: Array<{ kind: string; key: string; label: string }> = []
+     if (foregroundSubagents() && backgroundShortcut()) {
+       items.push({ kind: "background", key: backgroundShortcut(), label: "background" })
+     }
+     if (queuedPrompts().length > 0 && queuedShortcut()) {
+       items.push({ kind: "queued", key: queuedShortcut(), label: `${queue()} queued` })
+     }
+     if (activeTabs().length > 0 && subagentShortcut()) {
+       items.push({ kind: "subagents", key: subagentShortcut(), label: "subagents" })
+     }
 
-    const limit = responsive().statusline.contextHintLimit
-    return limit === undefined ? items : items.slice(0, limit)
-  })
+     const limit = responsive().statusline.contextHintLimit
+     return limit === undefined ? items : items.slice(0, limit)
+   })
   const hasContextHints = createMemo(() => contextHints().length > 0)
   const commandHint = createMemo(() => {
     if (!prompt() || !responsive().statusline.showCommandHint) {
@@ -600,6 +613,7 @@ export function RunFooterView(props: RunFooterViewProps) {
     if (
       current.type !== "command" &&
       current.type !== "skill" &&
+      current.type !== "identity" &&
       current.type !== "model" &&
       current.type !== "variant" &&
       current.type !== "queued-menu" &&
@@ -714,6 +728,7 @@ export function RunFooterView(props: RunFooterViewProps) {
                               closePanel()
                               void composer.openEditor()
                             }}
+                            onIdentity={openIdentity}
                             onSkill={openSkillMenu}
                             onSubagent={openSubagentMenu}
                             onQueued={openQueuedMenu}
@@ -749,6 +764,16 @@ export function RunFooterView(props: RunFooterViewProps) {
                               })
                               closePanel()
                             }}
+                          />
+                        </Match>
+                        <Match when={identitying()}>
+                          <RunIdentityMenuBody
+                            theme={theme}
+                            sdk={props.sdk}
+                            identity={identity}
+                            onClose={closePanel}
+                            onIdentity={props.onIdentity}
+                            onStatus={props.onStatus}
                           />
                         </Match>
                         <Match when={modeling()}>
@@ -812,15 +837,15 @@ export function RunFooterView(props: RunFooterViewProps) {
               />
             </Show>
 
-            <Show when={!panel() && !menu()}>
-              <box
-                width="100%"
-                height={1}
-                flexDirection="row"
-                gap={0}
-                flexShrink={0}
-                backgroundColor={statuslineBackground()}
-              >
+               <Show when={!panel() && !menu()}>
+                <box
+                 width="100%"
+                 height={1}
+                 flexDirection="row"
+                 gap={0}
+                 flexShrink={0}
+                 backgroundColor={statuslineBackground()}
+               >
                 <box paddingLeft={1} paddingRight={1} backgroundColor={theme().statusAccent} flexShrink={0}>
                   <text wrapMode="none" truncate>
                     <span style={{ fg: modeColor(), bold: true }}>{modeLabel()}</span>
@@ -857,6 +882,23 @@ export function RunFooterView(props: RunFooterViewProps) {
                   <box paddingRight={1} backgroundColor="transparent" flexShrink={1}>
                     <text fg={theme().muted} wrapMode="none" truncate>
                       {activityMeta()}
+                    </text>
+                  </box>
+                </Show>
+
+                <Show when={responsive().statusline.showActivityMeta && identity().status !== "not_authenticated"}>
+                  <box paddingRight={1} backgroundColor="transparent" flexShrink={0} maxWidth={24}>
+                    <text fg={theme().text} wrapMode="none" truncate>
+                      <Show when={hasActivityMeta()}>{sectionSeparator()}</Show>
+                      <Switch>
+                        <Match when={identity().status === "authenticated"}>
+                          <span style={{ fg: theme().success }}>● </span>
+                        </Match>
+                        <Match when={true}>
+                          <span style={{ fg: theme().warning }}>△ </span>
+                        </Match>
+                      </Switch>
+                      {identityLabel()}
                     </text>
                   </box>
                 </Show>
@@ -908,6 +950,8 @@ export function RunFooterView(props: RunFooterViewProps) {
                     </box>
                   )}
                 </Show>
+
+
               </box>
             </Show>
           </box>

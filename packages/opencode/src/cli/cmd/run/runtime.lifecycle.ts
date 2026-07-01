@@ -25,6 +25,7 @@ import type {
   QuestionReject,
   QuestionReply,
   RunAgent,
+  RunIdentity,
   RunInput,
   RunPrompt,
   RunResource,
@@ -53,6 +54,7 @@ type FooterLabels = {
 
 export type LifecycleInput = {
   directory: string
+  sdk: RunInput["sdk"]
   findFiles: (query: string) => Promise<string[]>
   agents: RunAgent[]
   resources: RunResource[]
@@ -61,6 +63,7 @@ export type LifecycleInput = {
   getSessionID?: () => string | undefined
   first: boolean
   history: RunPrompt[]
+  identity: RunIdentity
   agent: string | undefined
   model: RunInput["model"]
   variant: string | undefined
@@ -231,11 +234,13 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
 
     const footer = new RunFooter(renderer, {
       directory: input.directory,
+      sdk: input.sdk,
       findFiles: input.findFiles,
       agents: input.agents,
       resources: input.resources,
       sessionID: input.getSessionID ?? (() => input.sessionID),
       ...labels,
+      identity: input.identity,
       model: input.model,
       variant: input.variant,
       first: input.first,

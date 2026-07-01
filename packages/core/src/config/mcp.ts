@@ -31,10 +31,16 @@ export class OAuth extends Schema.Class<OAuth>("ConfigV2.MCP.OAuth")({
   redirect_uri: Schema.String.pipe(Schema.optional),
 }) {}
 
+export class AuthBearer extends Schema.Class<AuthBearer>("ConfigV2.MCP.AuthBearer")({
+  type: Schema.Literal("bearer"),
+  provider: Schema.Literal("keycloak"),
+}) {}
+
 export class Remote extends Schema.Class<Remote>("ConfigV2.MCP.Remote")({
   type: Schema.Literal("remote"),
   url: Schema.String,
   headers: Schema.Record(Schema.String, Schema.String).pipe(Schema.optional),
+  auth: AuthBearer.pipe(Schema.optional),
   oauth: Schema.Union([OAuth, Schema.Literal(false)]).pipe(Schema.optional),
   disabled: Schema.Boolean.pipe(Schema.optional),
   timeout: Timeout.pipe(Schema.optional),

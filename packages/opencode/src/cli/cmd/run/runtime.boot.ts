@@ -7,11 +7,14 @@
 // none block each other.
 import { Context, Effect, Layer } from "effect"
 import { resolve } from "@opencode-ai/tui/config"
+import { Auth } from "@/auth"
+import { KeycloakAuth } from "@/auth/keycloak"
 import { TuiConfig } from "@/config/tui"
+import { AppNodeBuilderV1 } from "@/effect/app-node-builder-v1"
 import { makeRuntime } from "@/effect/run-service"
 import { reusePendingTask } from "./runtime.shared"
 import { resolveSession, sessionHistory } from "./session.shared"
-import type { RunDiffStyle, RunInput, RunPrompt, RunProvider, RunTuiConfig } from "./types"
+import type { RunDiffStyle, RunIdentity, RunInput, RunPrompt, RunProvider, RunTuiConfig } from "./types"
 import { pickVariant } from "./variant.shared"
 
 export type ModelInfo = {
@@ -24,6 +27,11 @@ export type SessionInfo = {
   first: boolean
   history: RunPrompt[]
   variant: string | undefined
+  identity: RunIdentity
+}
+
+export type AuthInfo = {
+  identity: RunIdentity
 }
 
 type Config = Awaited<ReturnType<typeof TuiConfig.get>>
@@ -38,6 +46,7 @@ type BootService = {
     sessionID: string,
     model: RunInput["model"],
   ) => Effect.Effect<SessionInfo>
+  readonly resolveAuthInfo: () => Effect.Effect<AuthInfo>
   readonly resolveRunTuiConfig: () => Effect.Effect<RunTuiConfig>
   readonly resolveDiffStyle: () => Effect.Effect<RunDiffStyle>
 }
@@ -63,7 +72,25 @@ function emptySessionInfo(): SessionInfo {
     first: true,
     history: [],
     variant: undefined,
+    identity: emptyIdentityInfo(),
   }
+}
+
+function emptyAuthInfo(): AuthInfo {
+  return {
+    identity: emptyIdentityInfo(),
+  }
+}
+
+function emptyIdentityInfo(): RunIdentity {
+  return {
+    provider: "keycloak",
+    status: "not_authenticated",
+  }
+}
+
+function keycloakIdentity(entry: Auth.Info | undefined): RunIdentity {
+  return KeycloakAuth.identityFromEntry(entry?.type === "keycloak" ? entry : undefined)
 }
 
 function defaultRunTuiConfig(): RunTuiConfig {
@@ -88,6 +115,7 @@ function runTuiConfig(config: Config | undefined): RunTuiConfig {
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
+    const auth = yield* Auth.Service
     const config = Effect.fn("RunBoot.config")(() => Effect.promise(() => loadConfig().catch(() => undefined)))
 
     const resolveModelInfo = Effect.fn("RunBoot.resolveModelInfo")(function* (
@@ -144,14 +172,24 @@ const layer = Layer.effect(
       model: RunInput["model"],
     ) {
       const session = yield* Effect.promise(() => resolveSession(sdk, sessionID).catch(() => undefined))
+      const authEntry = yield* auth.get("keycloak").pipe(Effect.orDie)
+      const identity = keycloakIdentity(authEntry)
       if (!session) {
-        return emptySessionInfo()
+        return { ...emptySessionInfo(), identity }
       }
 
       return {
         first: session.first,
         history: sessionHistory(session),
         variant: pickVariant(model, session),
+        identity,
+      }
+    })
+
+    const resolveAuthInfo = Effect.fn("RunBoot.resolveAuthInfo")(function* () {
+      const authEntry = yield* auth.get("keycloak").pipe(Effect.orDie)
+      return {
+        identity: keycloakIdentity(authEntry),
       }
     })
 
@@ -166,13 +204,14 @@ const layer = Layer.effect(
     return Service.of({
       resolveModelInfo,
       resolveSessionInfo,
+      resolveAuthInfo,
       resolveRunTuiConfig,
       resolveDiffStyle,
     })
   }),
 )
 
-const runtime = makeRuntime(Service, layer)
+const runtime = makeRuntime(Service, layer.pipe(Layer.provide(AppNodeBuilderV1.build(Auth.node))))
 
 // Fetches available variants and context limits for every provider/model pair.
 export async function resolveModelInfo(
@@ -190,6 +229,10 @@ export async function resolveSessionInfo(
   model: RunInput["model"],
 ): Promise<SessionInfo> {
   return runtime.runPromise((svc) => svc.resolveSessionInfo(sdk, sessionID, model)).catch(() => emptySessionInfo())
+}
+
+export async function resolveAuthInfo(): Promise<AuthInfo> {
+  return runtime.runPromise((svc) => svc.resolveAuthInfo()).catch(() => emptyAuthInfo())
 }
 
 // Reads TUI config once for direct mode keymap setup and display preferences.

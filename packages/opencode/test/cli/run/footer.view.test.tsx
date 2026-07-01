@@ -36,6 +36,18 @@ import { RejectField } from "@/cli/cmd/run/footer.permission"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
 
 const tuiConfig = createTuiResolvedConfig()
+const emptyIdentity = {
+  provider: "keycloak",
+  status: "not_authenticated",
+} satisfies FooterState["identity"]
+const sdk = {
+  identity: {
+    keycloak: {
+      status: async () => ({ data: emptyIdentity }),
+      logout: async () => ({ data: emptyIdentity }),
+    },
+  },
+} as unknown as RunInput["sdk"]
 
 function command(input: { name: string; description: string; source?: "command" | "mcp" | "skill" }) {
   return {
@@ -142,6 +154,7 @@ function footerState(input: Partial<FooterState> = {}) {
     status: "",
     queue: 0,
     model: "gpt-5",
+    identity: emptyIdentity,
     duration: "",
     usage: "",
     first: false,
@@ -185,6 +198,7 @@ async function renderFooter(
       <OpencodeKeymapProvider keymap={keymap}>
         <RunFooterView
           directory="/tmp"
+          sdk={sdk}
           findFiles={async () => []}
           agents={() => []}
           resources={() => []}
@@ -214,6 +228,7 @@ async function renderFooter(
           onRows={() => {}}
           onLayout={() => {}}
           onStatus={() => {}}
+          onIdentity={() => {}}
           onQueuedRemove={async () => true}
         />
       </OpencodeKeymapProvider>
@@ -378,6 +393,7 @@ test("direct command panel renders grouped command palette", async () => {
           onClose={() => {}}
           onModel={() => {}}
           onEditor={() => {}}
+          onIdentity={() => {}}
           onSkill={() => {}}
           onSubagent={() => {}}
           onQueued={() => {}}
@@ -519,6 +535,7 @@ test("direct command panel shows subagent entry when available", async () => {
           onClose={() => {}}
           onModel={() => {}}
           onEditor={() => {}}
+          onIdentity={() => {}}
           onSkill={() => {}}
           onSubagent={() => {}}
           onQueued={() => {}}
@@ -567,6 +584,7 @@ test("direct command panel keeps completed subagents available", async () => {
           onClose={() => {}}
           onModel={() => {}}
           onEditor={() => {}}
+          onIdentity={() => {}}
           onSkill={() => {}}
           onSubagent={() => {}}
           onQueued={() => {}}
@@ -909,6 +927,7 @@ test("direct footer shows editable prompts and additional queued work while runn
     status: "",
     queue: 3,
     model: "gpt-5",
+    identity: emptyIdentity,
     duration: "",
     usage: "",
     first: false,
@@ -932,6 +951,7 @@ test("direct footer shows editable prompts and additional queued work while runn
       <OpencodeKeymapProvider keymap={keymap}>
         <RunFooterView
           directory="/tmp"
+          sdk={sdk}
           findFiles={async () => []}
           agents={() => []}
           resources={() => []}
@@ -967,6 +987,7 @@ test("direct footer shows editable prompts and additional queued work while runn
           onRows={() => {}}
           onLayout={() => {}}
           onStatus={() => {}}
+          onIdentity={() => {}}
           onQueuedRemove={async () => true}
         />
       </OpencodeKeymapProvider>

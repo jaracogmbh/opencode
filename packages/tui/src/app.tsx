@@ -40,6 +40,7 @@ import { LocalProvider, useLocal } from "./context/local"
 import { PermissionProvider } from "./context/permission"
 import { DialogModel } from "./component/dialog-model"
 import { useConnected } from "./component/use-connected"
+import { DialogIdentity } from "./component/dialog-identity"
 import { DialogMcp } from "./component/dialog-mcp"
 import { DialogStatus } from "./component/dialog-status"
 import { DialogThemeList } from "./component/dialog-theme-list"
@@ -113,6 +114,7 @@ const appBindingCommands = [
   "variant.cycle",
   "variant.list",
   "provider.connect",
+  "identity.menu",
   "console.org.switch",
   "opencode.status",
   "theme.switch",
@@ -761,6 +763,16 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         slashName: "status",
         run: () => {
           dialog.replace(() => <DialogStatus />)
+        },
+        category: "System",
+      },
+      {
+        name: "identity.menu",
+        title: "Identity",
+        slashName: "identity",
+        suggested: sync.data.identity.status === "expired",
+        run: () => {
+          dialog.replace(() => <DialogIdentity />)
         },
         category: "System",
       },

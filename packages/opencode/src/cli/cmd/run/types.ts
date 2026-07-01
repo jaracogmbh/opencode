@@ -11,7 +11,7 @@
 //     → stream.ts bridges to footer API
 //       → footer.ts queues commits and patches the footer view
 //         → OpenTUI split-footer renderer writes to terminal
-import type { OpencodeClient, PermissionRequest, QuestionRequest, ToolPart } from "@opencode-ai/sdk/v2"
+import type { KeycloakIdentity, OpencodeClient, PermissionRequest, QuestionRequest, ToolPart } from "@opencode-ai/sdk/v2"
 import type { TuiConfig } from "@opencode-ai/tui/config"
 
 export type RunFilePart = {
@@ -29,6 +29,8 @@ export type RunPromptPart = NonNullable<PromptInput["parts"]>[number]
 export type RunCommand = NonNullable<Awaited<ReturnType<OpencodeClient["command"]["list"]>>["data"]>[number]
 
 export type RunProvider = NonNullable<Awaited<ReturnType<OpencodeClient["provider"]["list"]>>["data"]>["all"][number]
+
+export type RunIdentity = KeycloakIdentity
 
 export type RunPrompt = {
   messageID?: string
@@ -85,6 +87,7 @@ export type FooterState = {
   status: string
   queue: number
   model: string
+  identity: RunIdentity
   duration: string
   usage: string
   first: boolean
@@ -182,6 +185,7 @@ export type FooterPromptRoute =
   | { type: "subagent"; sessionID: string }
   | { type: "command" }
   | { type: "skill" }
+  | { type: "identity" }
   | { type: "model" }
   | { type: "variant" }
 

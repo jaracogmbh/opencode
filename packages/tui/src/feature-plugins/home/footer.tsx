@@ -51,6 +51,31 @@ function Mcp(props: { api: TuiPluginApi }) {
   )
 }
 
+function Identity(props: { api: TuiPluginApi }) {
+  const theme = () => props.api.theme.current
+  const identity = createMemo(() => props.api.state.identity())
+  const label = createMemo(() => identity().username ?? identity().clientId ?? "Keycloak")
+
+  return (
+    <Show when={identity().status !== "not_authenticated"}>
+      <box flexDirection="row" gap={1} flexShrink={0}>
+        <text fg={theme().text}>
+          <Switch>
+            <Match when={identity().status === "authenticated"}>
+              <span style={{ fg: theme().success }}>● </span>
+            </Match>
+            <Match when={true}>
+              <span style={{ fg: theme().warning }}>△ </span>
+            </Match>
+          </Switch>
+          {label()}
+        </text>
+        <text fg={theme().textMuted}>/identity</text>
+      </box>
+    </Show>
+  )
+}
+
 function Version(props: { api: TuiPluginApi }) {
   const theme = () => props.api.theme.current
 
@@ -75,6 +100,7 @@ function View(props: { api: TuiPluginApi }) {
     >
       <Directory api={props.api} />
       <Mcp api={props.api} />
+      <Identity api={props.api} />
       <box flexGrow={1} />
       <Version api={props.api} />
     </box>

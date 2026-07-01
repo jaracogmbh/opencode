@@ -88,8 +88,18 @@ import type {
   GlobalHealthResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
+  IdentityKeycloakLoginFinishErrors,
+  IdentityKeycloakLoginFinishResponses,
+  IdentityKeycloakLoginStartErrors,
+  IdentityKeycloakLoginStartResponses,
+  IdentityKeycloakLogoutErrors,
+  IdentityKeycloakLogoutResponses,
+  IdentityKeycloakStatusErrors,
+  IdentityKeycloakStatusResponses,
   InstanceDisposeErrors,
   InstanceDisposeResponses,
+  KeycloakAuthLoginInput,
+  KeycloakLoginFinishInput,
   LocationRef,
   LspStatusErrors,
   LspStatusResponses,
@@ -1919,6 +1929,172 @@ export class File extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+}
+
+export class Login extends HeyApiClient {
+  /**
+   * Start Keycloak login
+   *
+   * Start the Keycloak OAuth authorization flow and return the browser authorization URL.
+   */
+  public start<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      keycloakAuthLoginInput?: KeycloakAuthLoginInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "keycloakAuthLoginInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      IdentityKeycloakLoginStartResponses,
+      IdentityKeycloakLoginStartErrors,
+      ThrowOnError
+    >({
+      url: "/identity/keycloak/login/start",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Finish Keycloak login
+   *
+   * Wait for the Keycloak OAuth callback, persist tokens, and return identity status.
+   */
+  public finish<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      keycloakLoginFinishInput?: KeycloakLoginFinishInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "keycloakLoginFinishInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      IdentityKeycloakLoginFinishResponses,
+      IdentityKeycloakLoginFinishErrors,
+      ThrowOnError
+    >({
+      url: "/identity/keycloak/login/finish",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Keycloak extends HeyApiClient {
+  /**
+   * Log out Keycloak identity
+   *
+   * Remove the global Keycloak SSO identity.
+   */
+  public logout<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<
+      IdentityKeycloakLogoutResponses,
+      IdentityKeycloakLogoutErrors,
+      ThrowOnError
+    >({
+      url: "/identity/keycloak",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Keycloak identity status
+   *
+   * Get the current global Keycloak SSO identity status without returning tokens.
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      IdentityKeycloakStatusResponses,
+      IdentityKeycloakStatusErrors,
+      ThrowOnError
+    >({
+      url: "/identity/keycloak",
+      ...options,
+      ...params,
+    })
+  }
+
+  private _login?: Login
+  get login(): Login {
+    return (this._login ??= new Login({ client: this.client }))
+  }
+}
+
+export class Identity extends HeyApiClient {
+  private _keycloak?: Keycloak
+  get keycloak(): Keycloak {
+    return (this._keycloak ??= new Keycloak({ client: this.client }))
   }
 }
 
@@ -7130,6 +7306,11 @@ export class OpencodeClient extends HeyApiClient {
   private _file?: File
   get file(): File {
     return (this._file ??= new File({ client: this.client }))
+  }
+
+  private _identity?: Identity
+  get identity(): Identity {
+    return (this._identity ??= new Identity({ client: this.client }))
   }
 
   private _instance?: Instance

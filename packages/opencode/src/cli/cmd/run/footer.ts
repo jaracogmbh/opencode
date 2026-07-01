@@ -52,6 +52,7 @@ import type {
   RunAgent,
   RunCommand,
   RunDiffStyle,
+  RunIdentity,
   RunInput,
   RunPrompt,
   RunProvider,
@@ -69,6 +70,7 @@ type CycleResult = {
 
 type RunFooterOptions = {
   directory: string
+  sdk: RunInput["sdk"]
   findFiles: (query: string) => Promise<string[]>
   agents: RunAgent[]
   resources: RunResource[]
@@ -77,6 +79,7 @@ type RunFooterOptions = {
   sessionID: () => string | undefined
   agentLabel: string
   modelLabel: string
+  identity: RunIdentity
   model: RunInput["model"]
   variant: string | undefined
   first: boolean
@@ -104,6 +107,7 @@ const PERMISSION_ROWS = 12
 const QUESTION_ROWS = 14
 const COMMAND_ROWS = RUN_COMMAND_PANEL_ROWS
 const SKILL_ROWS = RUN_COMMAND_PANEL_ROWS
+const IDENTITY_ROWS = RUN_COMMAND_PANEL_ROWS
 const SUBAGENT_ROWS = RUN_SUBAGENT_PANEL_ROWS
 const MODEL_ROWS = RUN_COMMAND_PANEL_ROWS
 const VARIANT_ROWS = RUN_COMMAND_PANEL_ROWS
@@ -241,6 +245,7 @@ export class RunFooter implements FooterApi {
       status: "",
       queue: 0,
       model: options.modelLabel,
+      identity: options.identity,
       duration: "",
       usage: "",
       first: options.first,
@@ -305,6 +310,7 @@ export class RunFooter implements FooterApi {
           get children() {
             return createComponent(RunFooterView, {
               directory: options.directory,
+              sdk: options.sdk,
               state: footer.state,
               view: footer.view,
               subagent: footer.subagent,
@@ -340,6 +346,7 @@ export class RunFooter implements FooterApi {
               onRows: footer.syncRows,
               onLayout: footer.syncLayout,
               onStatus: footer.setStatus,
+              onIdentity: footer.handleIdentity,
               onSubagentSelect: options.onSubagentSelect,
               onQueuedRemove: footer.handleQueuedRemove,
             })
@@ -488,6 +495,7 @@ export class RunFooter implements FooterApi {
       status: typeof next.status === "string" ? next.status : prev.status,
       queue: typeof next.queue === "number" ? Math.max(0, next.queue) : prev.queue,
       model: typeof next.model === "string" ? next.model : prev.model,
+      identity: next.identity ?? prev.identity,
       duration: typeof next.duration === "string" ? next.duration : prev.duration,
       usage: typeof next.usage === "string" ? next.usage : prev.usage,
       first: typeof next.first === "boolean" ? next.first : prev.first,
@@ -704,17 +712,19 @@ export class RunFooter implements FooterApi {
             ? 1 + COMMAND_ROWS
             : this.promptRoute.type === "skill"
               ? 1 + SKILL_ROWS
-              : this.promptRoute.type === "model"
-                ? 1 + MODEL_ROWS
-                : this.promptRoute.type === "variant"
-                  ? 1 + VARIANT_ROWS
-                  : this.promptRoute.type === "queued-menu"
-                    ? 1 + this.subagentMenuRows
-                    : this.promptRoute.type === "subagent-menu"
+              : this.promptRoute.type === "identity"
+                ? 1 + IDENTITY_ROWS
+                : this.promptRoute.type === "model"
+                  ? 1 + MODEL_ROWS
+                  : this.promptRoute.type === "variant"
+                    ? 1 + VARIANT_ROWS
+                    : this.promptRoute.type === "queued-menu"
                       ? 1 + this.subagentMenuRows
-                      : this.promptRoute.type === "subagent"
-                        ? this.base + SUBAGENT_INSPECTOR_ROWS
-                        : this.base + Math.max(TEXTAREA_MIN_ROWS, Math.min(PROMPT_MAX_ROWS, this.rows))
+                      : this.promptRoute.type === "subagent-menu"
+                        ? 1 + this.subagentMenuRows
+                        : this.promptRoute.type === "subagent"
+                          ? this.base + SUBAGENT_INSPECTOR_ROWS
+                          : this.base + Math.max(TEXTAREA_MIN_ROWS, Math.min(PROMPT_MAX_ROWS, this.rows))
 
     if (height !== this.renderer.footerHeight) {
       this.renderer.footerHeight = height
@@ -902,6 +912,10 @@ export class RunFooter implements FooterApi {
         }
       })
       .catch(() => {})
+  }
+
+  private handleIdentity = (identity: RunIdentity): void => {
+    this.patch({ identity })
   }
 
   private clearInterruptTimer(): void {

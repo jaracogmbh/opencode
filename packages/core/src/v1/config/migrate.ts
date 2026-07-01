@@ -150,6 +150,11 @@ function migrateMcp(info: ConfigMCPV1.Info) {
     type: info.type,
     url: info.url,
     headers: info.headers,
+    auth:
+      info.auth && {
+        type: info.auth.type,
+        provider: info.auth.provider,
+      },
     oauth: info.oauth && {
       client_id: info.oauth.clientId,
       client_secret: info.oauth.clientSecret,

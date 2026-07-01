@@ -129,7 +129,18 @@ export type WellKnownAuth = {
   token: string
 }
 
-export type Auth = OAuth | ApiAuth | WellKnownAuth
+export type KeycloakAuth = {
+  type: "keycloak"
+  issuer: string
+  clientId: string
+  access: string
+  refresh?: string
+  expires: number
+  scope?: string
+  clientSecret?: string
+}
+
+export type Auth = OAuth | ApiAuth | WellKnownAuth | KeycloakAuth
 
 export type EffectHttpApiErrorBadRequest = {
   _tag: "BadRequest"
@@ -1835,6 +1846,17 @@ export type McpLocalConfig = {
   timeout?: number
 }
 
+export type McpAuthBearerConfig = {
+  /**
+   * Use a runtime bearer token source
+   */
+  type: "bearer"
+  /**
+   * Global auth provider that supplies the bearer token
+   */
+  provider: "keycloak"
+}
+
 export type McpOAuthConfig = {
   clientId?: string
   clientSecret?: string
@@ -1856,6 +1878,7 @@ export type McpRemoteConfig = {
   headers?: {
     [key: string]: string
   }
+  auth?: McpAuthBearerConfig
   /**
    * OAuth authentication configuration for the MCP server. Set to false to disable OAuth auto-detection.
    */
@@ -2293,6 +2316,34 @@ export type File = {
   added: number
   removed: number
   status: "added" | "deleted" | "modified"
+}
+
+export type KeycloakIdentityStatus = "authenticated" | "expired" | "not_authenticated"
+
+export type KeycloakIdentity = {
+  provider: "keycloak"
+  status: KeycloakIdentityStatus
+  username?: string
+  issuer?: string
+  clientId?: string
+  expires?: number
+  scope?: string
+}
+
+export type KeycloakLoginStart = {
+  authorizationUrl: string
+  state: string
+}
+
+export type IdentityError = {
+  name: "KeycloakAuthError"
+  data: {
+    message: string
+  }
+}
+
+export type KeycloakLoginFinishInput = {
+  state: string
 }
 
 export type Path = {
@@ -3837,6 +3888,14 @@ export type ConfigV2ExperimentalPolicy = {
   action: "provider.use"
   effect: PolicyEffect
   resource: string
+}
+
+export type KeycloakAuthLoginInput = {
+  issuer: string
+  clientId: string
+  clientSecret?: string
+  scope?: string
+  redirectUri?: string
 }
 
 export type ProjectDirectories = Array<{
@@ -8075,6 +8134,121 @@ export type FileStatusResponses = {
 }
 
 export type FileStatusResponse = FileStatusResponses[keyof FileStatusResponses]
+
+export type IdentityKeycloakLogoutData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/identity/keycloak"
+}
+
+export type IdentityKeycloakLogoutErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type IdentityKeycloakLogoutError = IdentityKeycloakLogoutErrors[keyof IdentityKeycloakLogoutErrors]
+
+export type IdentityKeycloakLogoutResponses = {
+  /**
+   * Keycloak identity status
+   */
+  200: KeycloakIdentity
+}
+
+export type IdentityKeycloakLogoutResponse = IdentityKeycloakLogoutResponses[keyof IdentityKeycloakLogoutResponses]
+
+export type IdentityKeycloakStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/identity/keycloak"
+}
+
+export type IdentityKeycloakStatusErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type IdentityKeycloakStatusError = IdentityKeycloakStatusErrors[keyof IdentityKeycloakStatusErrors]
+
+export type IdentityKeycloakStatusResponses = {
+  /**
+   * Keycloak identity status
+   */
+  200: KeycloakIdentity
+}
+
+export type IdentityKeycloakStatusResponse = IdentityKeycloakStatusResponses[keyof IdentityKeycloakStatusResponses]
+
+export type IdentityKeycloakLoginStartData = {
+  body?: KeycloakAuthLoginInput
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/identity/keycloak/login/start"
+}
+
+export type IdentityKeycloakLoginStartErrors = {
+  /**
+   * IdentityError | InvalidRequestError
+   */
+  400: IdentityError | InvalidRequestError
+}
+
+export type IdentityKeycloakLoginStartError = IdentityKeycloakLoginStartErrors[keyof IdentityKeycloakLoginStartErrors]
+
+export type IdentityKeycloakLoginStartResponses = {
+  /**
+   * Keycloak login authorization URL
+   */
+  200: KeycloakLoginStart
+}
+
+export type IdentityKeycloakLoginStartResponse =
+  IdentityKeycloakLoginStartResponses[keyof IdentityKeycloakLoginStartResponses]
+
+export type IdentityKeycloakLoginFinishData = {
+  body?: KeycloakLoginFinishInput
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/identity/keycloak/login/finish"
+}
+
+export type IdentityKeycloakLoginFinishErrors = {
+  /**
+   * IdentityError | InvalidRequestError
+   */
+  400: IdentityError | InvalidRequestError
+}
+
+export type IdentityKeycloakLoginFinishError =
+  IdentityKeycloakLoginFinishErrors[keyof IdentityKeycloakLoginFinishErrors]
+
+export type IdentityKeycloakLoginFinishResponses = {
+  /**
+   * Keycloak identity status
+   */
+  200: KeycloakIdentity
+}
+
+export type IdentityKeycloakLoginFinishResponse =
+  IdentityKeycloakLoginFinishResponses[keyof IdentityKeycloakLoginFinishResponses]
 
 export type InstanceDisposeData = {
   body?: never

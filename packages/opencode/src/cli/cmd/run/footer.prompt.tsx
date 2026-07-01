@@ -48,7 +48,7 @@ type Auto = RunFooterMenuItem & {
 type SlashOption = RunFooterMenuItem & {
   kind: "slash"
   name: string
-  action?: "skill-menu" | "editor"
+  action?: "skill-menu" | "editor" | "identity-menu"
 }
 
 type PromptOption = Auto | SlashOption
@@ -76,6 +76,7 @@ type PromptInput = {
   onExitRequest?: () => boolean
   onExit: () => void
   onSkillMenu: () => void
+  onIdentityMenu: () => void
   onRows: (rows: number) => void
   onStatus: (text: string) => void
 }
@@ -175,7 +176,8 @@ function parseSlashCommand(text: string, commands: RunCommand[] | undefined) {
     return { type: "pending" as const }
   }
 
-  if (!commands.some((item) => item.name === head.name)) {
+  const builtinNames = ["editor", "new", "exit", "identity"]
+  if (!commands.some((item) => item.name === head.name) && !builtinNames.includes(head.name)) {
     return { type: "none" as const }
   }
 
@@ -418,6 +420,13 @@ export function createPromptState(input: PromptInput): PromptState {
       } satisfies SlashOption,
       { kind: "slash", name: "new", display: "/new", description: "start a new session" } satisfies SlashOption,
       { kind: "slash", name: "exit", display: "/exit", description: "close OpenCode" } satisfies SlashOption,
+      {
+        kind: "slash",
+        action: "identity-menu" as const,
+        name: "identity",
+        display: "/identity",
+        description: "manage Keycloak identity",
+      } satisfies SlashOption,
     ]
     const hidden = new Set(builtins.map((item) => item.name))
     const showSkillMenu = !shell() && skillCommands().length > 0 && !hasSkillsCommand()
@@ -846,7 +855,7 @@ export function createPromptState(input: PromptInput): PromptState {
     }
 
     if (next.kind === "slash") {
-      if (next.action === "editor") {
+      if (next.action === "editor" || next.name === "editor") {
         void openEditor({
           value: resolveEditorSlashValue(area.plainText),
         })
@@ -856,6 +865,12 @@ export function createPromptState(input: PromptInput): PromptState {
       if (next.action === "skill-menu") {
         cancelAutocomplete()
         input.onSkillMenu()
+        return
+      }
+
+      if (next.action === "identity-menu") {
+        cancelAutocomplete()
+        input.onIdentityMenu()
         return
       }
 

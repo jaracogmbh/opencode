@@ -104,6 +104,7 @@ type Opts = {
     part?: HostPluginApi["state"]["part"]
     lsp?: HostPluginApi["state"]["lsp"]
     mcp?: HostPluginApi["state"]["mcp"]
+    identity?: HostPluginApi["state"]["identity"]
   }
   theme?: {
     selected?: string
@@ -325,6 +326,12 @@ export function createTuiPluginApi(opts: Opts = {}): HostPluginApi {
       part: opts.state?.part ?? (() => []),
       lsp: opts.state?.lsp ?? (() => []),
       mcp: opts.state?.mcp ?? (() => []),
+      identity:
+        opts.state?.identity ??
+        (() => ({
+          provider: "keycloak",
+          status: "not_authenticated",
+        })),
     },
     theme: {
       get current() {

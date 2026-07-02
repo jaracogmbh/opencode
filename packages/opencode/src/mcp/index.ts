@@ -438,7 +438,6 @@ const layer = Layer.effect(
       }),
     )
     const cfgSvc = yield* Config.Service
-    const initialConfig = (yield* cfgSvc.get()).mcp ?? {}
 
     const descendants = Effect.fnUntraced(
       function* (pid: number) {
@@ -516,6 +515,9 @@ const layer = Layer.effect(
 
     const state = yield* InstanceState.make<State>(
       Effect.fn("MCP.state")(function* () {
+        const cfg = yield* cfgSvc.get()
+        const bridge = yield* EffectBridge.make()
+        const config = cfg.mcp ?? {}
         const s: State = {
           config: {},
           status: {},
@@ -525,7 +527,7 @@ const layer = Layer.effect(
         }
 
         yield* Effect.forEach(
-          Object.entries(initialConfig),
+          Object.entries(config),
           ([key, mcp]) =>
             Effect.gen(function* () {
               if (!isMcpConfigured(mcp)) {
@@ -533,14 +535,19 @@ const layer = Layer.effect(
                 return
               }
 
-              s.config[key] = mcp
-
               if (mcp.enabled === false) {
                 s.status[key] = { status: "disabled" }
                 return
               }
 
-              s.status[key] = { status: "disabled" }
+              const result = yield* create(key, mcp)
+              s.status[key] = result.status
+              if (result.mcpClient) {
+                s.clients[key] = result.mcpClient
+                s.defs[key] = result.defs!
+                if (result.instructions) s.instructions[key] = result.instructions
+                watch(s, key, result.mcpClient, bridge, mcp.timeout)
+              }
             }),
           { concurrency: "unbounded" },
         )
@@ -574,24 +581,6 @@ const layer = Layer.effect(
 
         return s
       }),
-    )
-
-    const initialState = yield* InstanceState.get(state)
-    yield* Effect.forEach(
-      Object.entries(initialState.config),
-      ([key, mcp]) =>
-        Effect.gen(function* () {
-          if (mcp.enabled === false) return
-          const result = yield* create(key, mcp)
-          initialState.status[key] = result.status
-          if (!result.mcpClient) return
-          initialState.clients[key] = result.mcpClient
-          initialState.defs[key] = result.defs!
-          if (result.instructions) initialState.instructions[key] = result.instructions
-          const bridge = yield* EffectBridge.make()
-          watch(initialState, key, result.mcpClient, bridge, mcp.timeout)
-        }),
-      { concurrency: "unbounded" },
     )
 
     function closeClient(s: State, name: string) {
@@ -1028,14 +1017,14 @@ const layer = Layer.effect(
       prompts,
       resources,
       resourceTemplates,
-      add: add as Interface["add"],
-      connect: connect as Interface["connect"],
+      add,
+      connect,
       disconnect,
       getPrompt,
       readResource,
       startAuth,
-      authenticate: authenticate as Interface["authenticate"],
-      finishAuth: finishAuth as Interface["finishAuth"],
+      authenticate,
+      finishAuth,
       removeAuth,
       supportsOAuth,
       hasStoredTokens,
@@ -1049,7 +1038,7 @@ export type AuthStatus = "authenticated" | "expired" | "not_authenticated"
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [CrossSpawnSpawner.node, McpAuth.node, KeycloakAuth.node, EventV2Bridge.node, Config.node] as never,
+  deps: [CrossSpawnSpawner.node, McpAuth.node, KeycloakAuth.node, EventV2Bridge.node, Config.node],
 })
 
 export * as MCP from "."

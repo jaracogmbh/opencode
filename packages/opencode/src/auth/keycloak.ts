@@ -144,6 +144,33 @@ const layer = Layer.effect(
 
     const logout = Effect.fn("KeycloakAuth.logout")(() => auth.remove(PROVIDER_ID).pipe(Effect.orDie))
 
+    const refresh = Effect.fn("KeycloakAuth.refresh")(function* () {
+      const entry = yield* auth.get(PROVIDER_ID).pipe(Effect.mapError(mapAuthError))
+      if (!entry || entry.type !== "keycloak") {
+        return yield* new KeycloakAuthError({ message: "No active Keycloak session" })
+      }
+      
+      if (!entry.refresh) {
+        return yield* new KeycloakAuthError({ message: "No refresh token available" })
+      }
+      
+      const wellKnown = yield* discoverWellKnown(entry.issuer)
+      const refreshed = yield* refreshTokens(wellKnown, entry)
+      yield* auth
+        .set(PROVIDER_ID, {
+          type: "keycloak",
+          issuer: entry.issuer,
+          clientId: entry.clientId,
+          clientSecret: entry.clientSecret,
+          access: refreshed.access,
+          refresh: refreshed.refresh,
+          expires: refreshed.expires,
+          scope: refreshed.scope,
+        })
+        .pipe(Effect.mapError(mapAuthError))
+      return refreshed.access
+    })
+
     const token = Effect.fn("KeycloakAuth.token")(function* () {
       const entry = yield* auth.get(PROVIDER_ID).pipe(Effect.mapError(mapAuthError))
       if (!entry || entry.type !== "keycloak") return undefined

@@ -1004,6 +1004,9 @@ const layer = Layer.effect(
         : undefined
       const mcpConfig = runtimeConfig ?? (yield* cfgSvc.get()).mcp?.[mcpName]
       if (!mcpConfig || !isMcpConfigured(mcpConfig) || mcpConfig.type !== "remote") return "not_authenticated"
+      if (mcpConfig.auth?.type === "bearer" && mcpConfig.auth.provider === "keycloak") {
+        return yield* keycloakAuth.status()
+      }
       const entry = yield* auth.getForUrl(mcpName, mcpConfig.url)
       if (!entry?.tokens) return "not_authenticated"
       if (entry.tokens.expiresAt && entry.tokens.expiresAt < Date.now() / 1000) return "expired"

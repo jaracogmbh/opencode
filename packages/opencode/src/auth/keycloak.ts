@@ -4,6 +4,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Auth } from "@/auth"
+import { Config } from "@/config/config"
 import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
 import { Effect, Layer, Context, Option, Schema } from "effect"
 import { createServer } from "node:http"
@@ -18,13 +19,28 @@ const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000
 
 const DEFAULT_REDIRECT_URI = `http://${REDIRECT_HOST}:${REDIRECT_PORT}${REDIRECT_PATH}`
 
+// Environment variable names
+const ENV_ISSUER = "OPENCODE_KEYCLOAK_ISSUER"
+const ENV_CLIENT_ID = "OPENCODE_KEYCLOAK_CLIENT_ID"
+const ENV_CLIENT_SECRET = "OPENCODE_KEYCLOAK_CLIENT_SECRET"
+const ENV_SCOPE = "OPENCODE_KEYCLOAK_SCOPE"
+const ENV_REDIRECT_URI = "OPENCODE_KEYCLOAK_REDIRECT_URI"
+
 export class LoginInput extends Schema.Class<LoginInput>("KeycloakAuth.LoginInput")({
-  issuer: Schema.String,
-  clientId: Schema.String,
+  issuer: Schema.String.pipe(Schema.optional),
+  clientId: Schema.String.pipe(Schema.optional),
   clientSecret: Schema.optional(Schema.String),
   scope: Schema.optional(Schema.String),
   redirectUri: Schema.optional(Schema.String),
 }) {}
+
+type ResolvedLoginInput = {
+  issuer: string
+  clientId: string
+  clientSecret?: string
+  scope?: string
+  redirectUri: string
+}
 
 export class KeycloakAuthError extends Schema.TaggedErrorClass<KeycloakAuthError>()("KeycloakAuthError", {
   message: Schema.String,
@@ -47,6 +63,12 @@ export class Identity extends Schema.Class<Identity>("KeycloakIdentity")({
   scope: Schema.optional(Schema.String),
 }) {}
 
+type IdentityDefaults = {
+  issuer?: string
+  clientId?: string
+  scope?: string
+}
+
 export class LoginStart extends Schema.Class<LoginStart>("KeycloakLoginStart")({
   authorizationUrl: Schema.String,
   state: Schema.String,
@@ -59,11 +81,11 @@ export class LoginFinishInput extends Schema.Class<LoginFinishInput>("KeycloakLo
 export interface Interface {
   readonly login: (input: LoginInput, onAuthorization?: (url: string) => void) => Effect.Effect<void, KeycloakAuthError>
   readonly startLogin: (input: LoginInput) => Effect.Effect<LoginStart, KeycloakAuthError>
-  readonly finishLogin: (input: LoginFinishInput) => Effect.Effect<Identity, KeycloakAuthError>
-  readonly logout: () => Effect.Effect<void>
-  readonly token: () => Effect.Effect<string | undefined, KeycloakAuthError>
-  readonly status: () => Effect.Effect<Status>
-  readonly identity: () => Effect.Effect<Identity>
+  readonly finishLogin: (input: LoginFinishInput) => Effect.Effect<Identity, KeycloakAuthError, Auth.Service>
+  readonly logout: () => Effect.Effect<void, never, Auth.Service>
+  readonly token: () => Effect.Effect<string | undefined, KeycloakAuthError, Auth.Service>
+  readonly status: () => Effect.Effect<Status, never, Auth.Service>
+  readonly identity: () => Effect.Effect<Identity, never, Auth.Service>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/KeycloakAuth") {}
@@ -83,7 +105,7 @@ interface TokenResponse {
 }
 
 interface PendingLogin {
-  input: LoginInput
+  input: ResolvedLoginInput
   wellKnown: WellKnown
   redirectUri: string
   verifier: string
@@ -97,11 +119,23 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const auth = yield* Auth.Service
+    const config = yield* Config.Service
     const pending = new Map<string, PendingLogin>()
+
+    const identityDefaults = Effect.fn("KeycloakAuth.identityDefaults")(function* () {
+      const cfg = yield* config.get()
+      const keycloak = cfg.auth?.keycloak
+      return {
+        issuer: keycloak?.issuer || process.env[ENV_ISSUER],
+        clientId: keycloak?.clientId || process.env[ENV_CLIENT_ID],
+        scope: keycloak?.scope || process.env[ENV_SCOPE] || DEFAULT_SCOPE,
+      } satisfies IdentityDefaults
+    })
 
     const identity = Effect.fn("KeycloakAuth.identity")(function* () {
       const entry = yield* auth.get(PROVIDER_ID).pipe(Effect.orDie)
-      return identityFromEntry(entry?.type === "keycloak" ? entry : undefined)
+      const defaults = yield* identityDefaults()
+      return identityFromEntry(entry?.type === "keycloak" ? entry : undefined, defaults)
     })
 
     const status = Effect.fn("KeycloakAuth.status")(function* () {
@@ -134,17 +168,51 @@ const layer = Layer.effect(
     })
 
     const startLogin = Effect.fn("KeycloakAuth.startLogin")(function* (input: LoginInput) {
-      const wellKnown = yield* discoverWellKnown(input.issuer)
+      const cfg = yield* config.get()
+
+      // Get configured values
+      const configAuth = cfg.auth?.keycloak
+
+      // Resolve configuration with priority: input > config > env > default
+      const resolvedIssuer = input.issuer || configAuth?.issuer || process.env[ENV_ISSUER]
+      const resolvedClientId = input.clientId || configAuth?.clientId || process.env[ENV_CLIENT_ID]
+      const resolvedClientSecret = input.clientSecret || configAuth?.clientSecret || process.env[ENV_CLIENT_SECRET]
+      const resolvedScope = input.scope || configAuth?.scope || process.env[ENV_SCOPE] || DEFAULT_SCOPE
+      const resolvedRedirectUri = input.redirectUri || configAuth?.redirectUri || process.env[ENV_REDIRECT_URI] || DEFAULT_REDIRECT_URI
+
+      // Validate required fields
+      if (!resolvedIssuer) {
+        return yield* new KeycloakAuthError({
+          message:
+            "Keycloak issuer URL is required. Set via config (auth.keycloak.issuer), environment variable (OPENCODE_KEYCLOAK_ISSUER), or provide explicitly.",
+        })
+      }
+
+      if (!resolvedClientId) {
+        return yield* new KeycloakAuthError({
+          message:
+            "Keycloak client ID is required. Set via config (auth.keycloak.clientId), environment variable (OPENCODE_KEYCLOAK_CLIENT_ID), or provide explicitly.",
+        })
+      }
+
+      const resolved: ResolvedLoginInput = {
+        issuer: resolvedIssuer,
+        clientId: resolvedClientId,
+        clientSecret: resolvedClientSecret,
+        scope: resolvedScope,
+        redirectUri: resolvedRedirectUri,
+      }
+
+      const wellKnown = yield* discoverWellKnown(resolved.issuer)
       const state = randomState()
       const pkce = yield* Effect.promise(generatePKCE).pipe(Effect.mapError(toKeycloakError("Failed to generate PKCE")))
-      const resolvedRedirectUri = input.redirectUri || DEFAULT_REDIRECT_URI
-      const codePromise = waitForAuthorizationCode(state, resolvedRedirectUri)
-      const url = buildAuthorizeUrl(wellKnown.authorization_endpoint, input, resolvedRedirectUri, state, pkce.challenge)
+      const codePromise = waitForAuthorizationCode(state, resolved.redirectUri)
+      const url = buildAuthorizeUrl(wellKnown.authorization_endpoint, resolved, resolved.redirectUri, state, pkce.challenge)
       void codePromise.catch(() => undefined)
       pending.set(state, {
-        input,
+        input: resolved,
         wellKnown,
-        redirectUri: resolvedRedirectUri,
+        redirectUri: resolved.redirectUri,
         verifier: pkce.verifier,
         code: codePromise,
       })
@@ -190,15 +258,26 @@ const layer = Layer.effect(
       yield* finishLogin(new LoginFinishInput({ state: started.state }))
     })
 
-    return Service.of({ login, startLogin, finishLogin, logout, token, status, identity })
+    return Service.of({
+      login: login as Interface["login"],
+      startLogin: startLogin as Interface["startLogin"],
+      finishLogin: finishLogin as Interface["finishLogin"],
+      logout: logout as Interface["logout"],
+      token: token as Interface["token"],
+      status: status as Interface["status"],
+      identity: identity as Interface["identity"],
+    } satisfies Interface)
   }),
 )
 
-export function identityFromEntry(entry: Auth.Keycloak | undefined): Identity {
+export function identityFromEntry(entry: Auth.Keycloak | undefined, defaults?: IdentityDefaults): Identity {
   if (!entry) {
     return new Identity({
       provider: "keycloak",
       status: "not_authenticated",
+      issuer: defaults?.issuer,
+      clientId: defaults?.clientId,
+      scope: defaults?.scope,
     })
   }
 
@@ -248,7 +327,13 @@ function discoverWellKnown(issuer: string) {
   })
 }
 
-function exchangeCode(wellKnown: WellKnown, input: LoginInput, redirectUri: string, code: string, verifier: string) {
+function exchangeCode(
+  wellKnown: WellKnown,
+  input: ResolvedLoginInput,
+  redirectUri: string,
+  code: string,
+  verifier: string,
+) {
   return Effect.tryPromise({
     try: async () => {
       const response = await fetch(wellKnown.token_endpoint, {
@@ -364,7 +449,13 @@ function waitForAuthorizationCode(expectedState: string, redirectUri: string): P
   })
 }
 
-function buildAuthorizeUrl(endpoint: string, input: LoginInput, redirectUri: string, state: string, challenge: string) {
+function buildAuthorizeUrl(
+  endpoint: string,
+  input: ResolvedLoginInput,
+  redirectUri: string,
+  state: string,
+  challenge: string,
+) {
   const params = new URLSearchParams({
     response_type: "code",
     client_id: input.clientId,
@@ -431,4 +522,4 @@ function toKeycloakError(message: string) {
   return (error: unknown) => new KeycloakAuthError({ message: `${message}: ${errorMessage(error)}` })
 }
 
-export const node = LayerNode.make({ service: Service, layer, deps: [Auth.node] })
+export const node = LayerNode.make({ service: Service, layer, deps: [Auth.node, Config.node] })

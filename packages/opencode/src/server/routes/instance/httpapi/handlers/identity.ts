@@ -21,6 +21,7 @@ export const identityHandlers = HttpApiBuilder.group(InstanceHttpApi, "identity"
     const keycloak = yield* KeycloakAuth.Service
 
     const keycloakStatus = Effect.fn("IdentityHttpApi.keycloakStatus")(function* () {
+      yield* mapIdentityError(keycloak.token()).pipe(Effect.orElseSucceed(() => undefined))
       return yield* keycloak.identity()
     })
 

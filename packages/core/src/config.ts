@@ -54,6 +54,27 @@ export class Info extends Schema.Class<Info>("Config.Info")({
     .annotate({
       description: "Enterprise sharing service configuration",
     }),
+  auth: Schema.Struct({
+    keycloak: Schema.Struct({
+      issuer: Schema.String.pipe(Schema.optional).annotate({
+        description: "Keycloak issuer URL (e.g., https://sso.example.com/realms/my-realm)",
+      }),
+      clientId: Schema.String.pipe(Schema.optional).annotate({
+        description: "Keycloak client ID",
+      }),
+      clientSecret: Schema.String.pipe(Schema.optional).annotate({
+        description: "Keycloak client secret (optional for public clients)",
+      }),
+      scope: Schema.String.pipe(Schema.optional).annotate({
+        description: "OAuth2 scopes for Keycloak authentication (default: openid profile email offline_access)",
+      }),
+      redirectUri: Schema.String.pipe(Schema.optional).annotate({
+        description: "OAuth2 redirect URI for Keycloak authentication (default: http://127.0.0.1:19877)",
+      }),
+    }).pipe(Schema.optional),
+  }).pipe(Schema.optional).annotate({
+    description: "Authentication provider configurations",
+  }),
   username: Schema.String.pipe(Schema.optional).annotate({
     description: "Username displayed in conversations and used for telemetry identity",
   }),

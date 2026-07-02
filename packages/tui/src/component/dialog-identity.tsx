@@ -62,9 +62,13 @@ async function promptRequired(input: {
   toast: ReturnType<typeof useToast>
   title: string
   placeholder: string
+  value?: string
   validate?: (value: string) => boolean
 }): Promise<string | undefined> {
-  const value = await DialogPrompt.show(input.dialog, input.title, { placeholder: input.placeholder })
+  const value = await DialogPrompt.show(input.dialog, input.title, {
+    placeholder: input.placeholder,
+    value: input.value,
+  })
   if (value === null) return
   const trimmed = value.trim()
   if (trimmed.length > 0 && (input.validate?.(trimmed) ?? true)) return trimmed
@@ -75,11 +79,13 @@ async function promptRequired(input: {
 async function promptLogin(input: {
   dialog: ReturnType<typeof useDialog>
   toast: ReturnType<typeof useToast>
+  identity: KeycloakIdentity
 }): Promise<KeycloakAuthLoginInput | undefined> {
   const issuer = await promptRequired({
     ...input,
     title: "Keycloak issuer URL",
-    placeholder: "https://sso.example.com/realms/my-realm",
+    placeholder: input.identity.issuer ?? "Configured on server or env",
+    value: input.identity.issuer,
     validate: URL.canParse,
   })
   if (!issuer) return
@@ -87,13 +93,14 @@ async function promptLogin(input: {
   const clientId = await promptRequired({
     ...input,
     title: "Keycloak client ID",
-    placeholder: "opencode-cli",
+    placeholder: input.identity.clientId ?? "Configured on server or env",
+    value: input.identity.clientId,
   })
   if (!clientId) return
 
   const scopeInput = await DialogPrompt.show(input.dialog, "Scopes", {
-    placeholder: DEFAULT_SCOPE,
-    value: DEFAULT_SCOPE,
+    placeholder: input.identity.scope ?? DEFAULT_SCOPE,
+    value: input.identity.scope ?? DEFAULT_SCOPE,
   })
   if (scopeInput === null) return
 
@@ -199,7 +206,7 @@ export function DialogIdentity() {
   }
 
   async function login() {
-    const input = await promptLogin({ dialog, toast })
+    const input = await promptLogin({ dialog, toast, identity: sync.data.identity })
     if (!input) return
     const result = await sdk.client.identity.keycloak.login.start({
       keycloakAuthLoginInput: input,

@@ -130,6 +130,31 @@ export const Info = Schema.Struct({
   enterprise: Schema.optional(
     Schema.Struct({ url: Schema.optional(Schema.String).annotate({ description: "Enterprise URL" }) }),
   ),
+  auth: Schema.optional(
+    Schema.Struct({
+      keycloak: Schema.optional(
+        Schema.Struct({
+          issuer: Schema.optional(Schema.String).annotate({
+            description: "Keycloak issuer URL (e.g., https://sso.example.com/realms/my-realm)",
+          }),
+          clientId: Schema.optional(Schema.String).annotate({
+            description: "Keycloak client ID",
+          }),
+          clientSecret: Schema.optional(Schema.String).annotate({
+            description: "Keycloak client secret (optional for public clients)",
+          }),
+          scope: Schema.optional(Schema.String).annotate({
+            description: "OAuth2 scopes for Keycloak authentication",
+          }),
+          redirectUri: Schema.optional(Schema.String).annotate({
+            description: "OAuth2 redirect URI for Keycloak authentication",
+          }),
+        })
+      ),
+    })
+  ).annotate({
+    description: "Authentication provider configurations",
+  }),
   tool_output: Schema.optional(
     Schema.Struct({
       max_lines: Schema.optional(PositiveInt).annotate({

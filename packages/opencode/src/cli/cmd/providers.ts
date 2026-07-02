@@ -45,72 +45,31 @@ function isKeycloakLogin(args: { url?: string; provider?: string }) {
   return args.url === "keycloak" || args.provider === "keycloak"
 }
 
-const keycloakLogin = Effect.fn("Cli.providers.keycloakLogin")(function* () {
-  const keycloak = yield* KeycloakAuth.Service
+const keycloakLogin = Effect.fn("Cli.providers.keycloakLogin")(
+  function* () {
+    const keycloak = yield* KeycloakAuth.Service
 
-  const issuer = yield* promptValue(
-    yield* Prompt.text({
-      message: "Keycloak issuer URL",
-      placeholder: "https://sso.example.com/realms/my-realm",
-      validate: (value) => (value && URL.canParse(value) ? undefined : "Enter a valid URL"),
-    }),
-  )
-  const clientId = yield* promptValue(
-    yield* Prompt.text({
-      message: "Keycloak client ID",
-      placeholder: "opencode-cli",
-      validate: (value) => (value && value.length > 0 ? undefined : "Required"),
-    }),
-  )
-  const scopeInput = yield* promptValue(
-    yield* Prompt.text({
-      message: "Scopes",
-      placeholder: KEYCLOAK_SCOPE,
-    }),
-  )
-  const clientSecretInput = yield* promptValue(
-    yield* Prompt.password({
-      message: "Client secret (optional)",
-    }),
-  )
-  const redirectUriInput = yield* promptValue(
-    yield* Prompt.text({
-      message: "Redirect URI",
-      placeholder: KEYCLOAK_REDIRECT_URI,
-      validate: (value) => (!value || URL.canParse(value) ? undefined : "Enter a valid URL"),
-    }),
-  )
+    const spinner = Prompt.spinner()
+    yield* spinner.start("Starting Keycloak login...")
 
-  const scope = scopeInput.trim() || KEYCLOAK_SCOPE
-  const clientSecret = clientSecretInput.trim() || undefined
-  const redirectUri = redirectUriInput.trim() || KEYCLOAK_REDIRECT_URI
-  const spinner = Prompt.spinner()
-  yield* spinner.start("Starting Keycloak login...")
-
-  let authorizationUrl: string | undefined
-  yield* keycloak
-    .login(
-      new KeycloakAuth.LoginInput({
-        issuer,
-        clientId,
-        clientSecret,
-        scope,
-        redirectUri,
-      }),
+    let authorizationUrl: string | undefined
+    yield* keycloak.login(
+      new KeycloakAuth.LoginInput({}),
       (url) => {
         authorizationUrl = url
         UI.println(`Open this URL to authorize: ${url}`)
         void open(url).catch(() => undefined)
       },
     )
-    .pipe(Effect.mapError((error) => new CliError({ message: error.message })))
 
-  yield* spinner.stop("Login successful")
-  if (!authorizationUrl) {
-    yield* Prompt.log.warn("Login completed without reporting an authorization URL")
-  }
-  yield* Prompt.outro("Done")
-})
+    yield* spinner.stop("Login successful")
+    if (!authorizationUrl) {
+      yield* Prompt.log.warn("Login completed without reporting an authorization URL")
+    }
+    yield* Prompt.outro("Done")
+  },
+  Effect.mapError((error) => new CliError({ message: error.message })),
+)
 
 const handlePluginAuth = Effect.fn("Cli.providers.pluginAuth")(function* (
   plugin: { auth: PluginAuth },
@@ -453,8 +412,10 @@ export const ProvidersLoginCommand = effectCmd({
 
     const config = yield* cfgSvc.get()
 
-    const disabled = new Set(config.disabled_providers ?? [])
-    const enabled = config.enabled_providers ? new Set(config.enabled_providers) : undefined
+    const disabled: Set<string> = new Set(config.disabled_providers ?? [])
+    const enabled: Set<string> | undefined = config.enabled_providers
+      ? new Set<string>(config.enabled_providers)
+      : undefined
 
     const allProviders = yield* modelsDev.get()
     const providers: Record<string, (typeof allProviders)[string]> = {}
@@ -477,7 +438,9 @@ export const ProvidersLoginCommand = effectCmd({
       existingProviders: providers,
       disabled,
       enabled,
-      providerNames: Object.fromEntries(Object.entries(config.provider ?? {}).map(([id, p]) => [id, p.name])),
+      providerNames: Object.fromEntries(
+        Object.entries(config.provider ?? {}).map(([id, p]) => [id, p.name]),
+      ) as Record<string, string | undefined>,
     })
     const options = [
       ...pipe(

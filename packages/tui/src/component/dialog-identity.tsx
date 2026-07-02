@@ -184,26 +184,16 @@ export function DialogIdentity() {
   const dialog = useDialog()
   const toast = useToast()
 
-    async function refresh() {
-      const result = await sdk.client.identity.keycloak.status()
-      if (result.data) {
-        sync.set("identity", result.data)
-        toast.show({ variant: "info", message: identityMessage(result.data) })
-        return
-      }
-      
-      // If status failed, try to refresh token
-      if (result.error && result.error.data?.message.includes("expired")) {
-        const refreshResult = await sdk.client.identity.keycloak.refresh()
-        if (refreshResult.data) {
-          sync.set("identity", refreshResult.data)
-          toast.show({ variant: "success", message: "Successfully refreshed identity" })
-          return
-        }
-      }
-      
-      toast.show({ variant: "error", message: result.error ? errorMessage(result.error) : "Failed to refresh identity" })
+  async function refresh() {
+    const result = await sdk.client.identity.keycloak.status()
+    if (result.data) {
+      sync.set("identity", result.data)
+      toast.show({ variant: "info", message: identityMessage(result.data) })
+      return
     }
+
+    toast.show({ variant: "error", message: result.error ? errorMessage(result.error) : "Failed to refresh identity" })
+  }
 
   async function logout() {
     const result = await sdk.client.identity.keycloak.logout()

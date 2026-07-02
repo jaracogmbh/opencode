@@ -29,7 +29,7 @@ import { McpAuth } from "./auth"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { TuiEvent } from "@/server/tui-event"
 import open from "open"
-import { Cause, Effect, Exit, Layer, Context, Schema, Stream } from "effect"
+import { Cause, Effect, Exit, Layer, Context, Schema, Scope, Stream } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -514,7 +514,8 @@ const layer = Layer.effect(
     }
 
     const state = yield* InstanceState.make<State>(
-      Effect.fn("MCP.state")(function* () {
+      () =>
+        Effect.gen(function* () {
         const cfg = yield* cfgSvc.get()
         const bridge = yield* EffectBridge.make()
         const config = cfg.mcp ?? {}
@@ -580,7 +581,7 @@ const layer = Layer.effect(
         )
 
         return s
-      }),
+        }) as Effect.Effect<State, never, Scope.Scope>,
     )
 
     function closeClient(s: State, name: string) {
@@ -1010,26 +1011,26 @@ const layer = Layer.effect(
     })
 
     return Service.of({
-      status,
-      clients,
-      instructions,
-      tools,
-      prompts,
-      resources,
-      resourceTemplates,
-      add,
-      connect,
-      disconnect,
-      getPrompt,
-      readResource,
-      startAuth,
-      authenticate,
-      finishAuth,
-      removeAuth,
-      supportsOAuth,
-      hasStoredTokens,
-      getAuthStatus,
-    })
+      status: status as Interface["status"],
+      clients: clients as Interface["clients"],
+      instructions: instructions as Interface["instructions"],
+      tools: tools as Interface["tools"],
+      prompts: prompts as Interface["prompts"],
+      resources: resources as Interface["resources"],
+      resourceTemplates: resourceTemplates as Interface["resourceTemplates"],
+      add: add as Interface["add"],
+      connect: connect as Interface["connect"],
+      disconnect: disconnect as Interface["disconnect"],
+      getPrompt: getPrompt as Interface["getPrompt"],
+      readResource: readResource as Interface["readResource"],
+      startAuth: startAuth as Interface["startAuth"],
+      authenticate: authenticate as Interface["authenticate"],
+      finishAuth: finishAuth as Interface["finishAuth"],
+      removeAuth: removeAuth as Interface["removeAuth"],
+      supportsOAuth: supportsOAuth as Interface["supportsOAuth"],
+      hasStoredTokens: hasStoredTokens as Interface["hasStoredTokens"],
+      getAuthStatus: getAuthStatus as Interface["getAuthStatus"],
+    } satisfies Interface)
   }),
 )
 

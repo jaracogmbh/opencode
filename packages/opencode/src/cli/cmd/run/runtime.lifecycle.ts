@@ -18,7 +18,7 @@ import { Session as SessionApi } from "@/session/session"
 import * as Locale from "@/util/locale"
 import { resolveInteractiveStdin } from "./runtime.stdin"
 import { entrySplash, exitSplash, splashMeta } from "./splash"
-import { resolveRunTheme, RUN_THEME_FALLBACK } from "./theme"
+import { resolveRunTheme } from "./theme"
 import type {
   FooterApi,
   PermissionReply,
@@ -176,192 +176,63 @@ function queueSplash(
 // The renderer starts in split-footer mode with captured stdout so that
 // scrollback commits and footer repaints happen in the same frame. After
 // the entry splash, RunFooter takes over the footer region.
-export function createRuntimeLifecycle(input: LifecycleInput): Promise<Lifecycle> {
+export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lifecycle> {
   const source = resolveInteractiveStdin()
   let unregisterKeymap: (() => void) | undefined
-  let closed = false
-  let sigintRegistered = false
-  let footer: RunFooter
 
-  // Create minimal footer reference immediately for the close function
-  const minimalFooter = {
-    idle: () => Promise.resolve(),
-    close: () => {},
-    destroy: () => {},
-    currentTheme: () => RUN_THEME_FALLBACK,
-    refreshTheme: () => {},
-  } as unknown as RunFooter
-
-  // Create renderer with immediate fallback background
-  const renderer = createCliRenderer({
-    stdin: source.stdin,
-    targetFps: 30,
-    maxFps: 60,
-    useMouse: false,
-    autoFocus: false,
-    openConsoleOnError: false,
-    exitOnCtrlC: false,
-    useKittyKeyboard: { events: process.platform === "win32" },
-    screenMode: "split-footer",
-    footerHeight: FOOTER_HEIGHT,
-    externalOutputMode: "capture-stdout",
-    consoleMode: "disabled",
-    clearOnShutdown: false,
-  })
-
-  // Set fallback background immediately to prevent black screen
-  renderer.setBackgroundColor(RUN_THEME_FALLBACK.background)
-
-  // Start theme resolution in background
-  const themePromise = resolveRunTheme(renderer).catch(() => RUN_THEME_FALLBACK)
-  const keymap = createDefaultOpenTuiKeymap(renderer)
-  unregisterKeymap = registerOpencodeKeymap(keymap, renderer, input.tuiConfig)
-  const state: SplashState = {
-    entry: false,
-    exit: false,
-  }
-  const splash = splashInfo(input.sessionTitle, input.history)
-  const meta = splashMeta({
-    title: splash.title,
-    session_id: input.sessionID,
-  })
-  const labels = footerLabels({
-    agent: input.agent,
-    model: input.model,
-    variant: input.variant,
-  })
-    // Start footer initialization in background
-    queueMicrotask(() => {
-      import("./footer").then(({ RunFooter }) => {
-        // Queue splash after footer is ready
-        const wrote = queueSplash(
-          renderer,
-          state,
-          "entry",
-          entrySplash({
-            ...meta,
-            theme: RUN_THEME_FALLBACK.splash,
-            showSession: splash.showSession,
-            detail: directoryLabel(input.directory),
-          }),
-        )
-        renderer.idle().catch(() => {})
-
-        // Create footer with fallback theme initially
-        footer = new RunFooter(renderer, {
-          directory: input.directory,
-          sdk: input.sdk,
-          findFiles: input.findFiles,
-          agents: input.agents,
-          resources: input.resources,
-          sessionID: input.getSessionID ?? (() => input.sessionID),
-          ...labels,
-          identity: input.identity,
-          model: input.model,
-          variant: input.variant,
-          first: input.first,
-          history: input.history,
-          theme: RUN_THEME_FALLBACK,
-          wrote,
-          keymap,
-          tuiConfig: input.tuiConfig,
-          backgroundSubagents: input.backgroundSubagents,
-          diffStyle: input.tuiConfig.diff_style ?? "auto",
-          onPermissionReply: input.onPermissionReply,
-          onQuestionReply: input.onQuestionReply,
-          onQuestionReject: input.onQuestionReject,
-          onCycleVariant: input.onCycleVariant,
-          onModelSelect: input.onModelSelect,
-          onVariantSelect: input.onVariantSelect,
-          onInterrupt: input.onInterrupt,
-          onBackground: input.onBackground,
-          onEditorOpen: async ({ value }) => {
-            if (closed || renderer.isDestroyed) {
-              return
-            }
-
-            await renderer.idle().catch(() => {})
-            const ignore = () => {}
-            detachSigint()
-            process.on("SIGINT", ignore)
-            try {
-              return await openEditor({
-                value,
-                cwd: input.directory,
-                renderer,
-                stdin: source.stdin,
-              })
-            } finally {
-              process.off("SIGINT", ignore)
-              attachSigint()
-            }
-          },
-          onSubagentSelect: input.onSubagentSelect,
-          onQueuedRemove: footer.handleQueuedRemove,
-        })
-
-        // Apply actual theme to footer in background
-        themePromise.then(theme => {
-          if (footer) {
-            footer.refreshTheme()
-          }
-        }).catch(() => {})
-      }).catch(() => {})
+  try {
+    const renderer = await createCliRenderer({
+      stdin: source.stdin,
+      targetFps: 30,
+      maxFps: 60,
+      useMouse: false,
+      autoFocus: false,
+      openConsoleOnError: false,
+      exitOnCtrlC: false,
+      useKittyKeyboard: { events: process.platform === "win32" },
+      screenMode: "split-footer",
+      footerHeight: FOOTER_HEIGHT,
+      externalOutputMode: "capture-stdout",
+      consoleMode: "disabled",
+      clearOnShutdown: false,
     })
-
-    // Return lifecycle promise with minimal footer reference
-    return Promise.resolve({
-      footer: minimalFooter,
-      refreshTheme() {
-        if (footer) {
-          footer.refreshTheme()
-        }
-      },
-      onResize(fn) {
-        let width = renderer.terminalWidth
-        let height = renderer.terminalHeight
-        const resize = () => {
-          if (width === renderer.terminalWidth && height === renderer.terminalHeight) {
-            return
-          }
-
-          width = renderer.terminalWidth
-          height = renderer.terminalHeight
-          fn()
-        }
-        renderer.on(CliRenderEvents.RESIZE, resize)
-        return () => renderer.off(CliRenderEvents.RESIZE, resize)
-      },
-      async resetForReplay(next) {
-        if (closed || renderer.isDestroyed || minimalFooter.isClosed) {
-          throw new Error("runtime closed")
-        }
-
-        await minimalFooter.idle()
-        if (closed || renderer.isDestroyed || minimalFooter.isClosed) {
-          throw new Error("runtime closed")
-        }
-
-        minimalFooter.resetForReplay(true)
-        renderer.resetSplitFooterForReplay({ clearSavedLines: true })
-        const splash = splashInfo(next.sessionTitle ?? input.sessionTitle, next.history)
-        renderer.writeToScrollback(
-          entrySplash({
-            ...splashMeta({
-              title: splash.title,
-              session_id: next.sessionID ?? input.getSessionID?.() ?? input.sessionID,
-            }),
-            theme: minimalFooter.currentTheme().splash,
-            showSession: splash.showSession,
-            detail: directoryLabel(input.directory),
-          }),
-        )
-        renderer.requestRender()
-      },
-      close,
+    const theme = await resolveRunTheme(renderer)
+    renderer.setBackgroundColor(theme.background)
+    const keymap = createDefaultOpenTuiKeymap(renderer)
+    unregisterKeymap = registerOpencodeKeymap(keymap, renderer, input.tuiConfig)
+    const state: SplashState = {
+      entry: false,
+      exit: false,
+    }
+    const splash = splashInfo(input.sessionTitle, input.history)
+    const meta = splashMeta({
+      title: splash.title,
+      session_id: input.sessionID,
     })
-      
-      footer = new RunFooter(renderer, {
+    const labels = footerLabels({
+      agent: input.agent,
+      model: input.model,
+      variant: input.variant,
+    })
+    const footerTask = import("./footer")
+    const wrote = queueSplash(
+      renderer,
+      state,
+      "entry",
+      entrySplash({
+        ...meta,
+        theme: theme.splash,
+        showSession: splash.showSession,
+        detail: directoryLabel(input.directory),
+      }),
+    )
+    await renderer.idle().catch(() => {})
+
+    const { RunFooter } = await footerTask
+    let closed = false
+    let sigintRegistered = false
+
+    const footer = new RunFooter(renderer, {
       directory: input.directory,
       sdk: input.sdk,
       findFiles: input.findFiles,
@@ -374,7 +245,7 @@ export function createRuntimeLifecycle(input: LifecycleInput): Promise<Lifecycle
       variant: input.variant,
       first: input.first,
       history: input.history,
-      theme: RUN_THEME_FALLBACK,
+      theme,
       wrote,
       keymap,
       tuiConfig: input.tuiConfig,
@@ -413,9 +284,7 @@ export function createRuntimeLifecycle(input: LifecycleInput): Promise<Lifecycle
     })
 
     const sigint = () => {
-      if (footer) {
-        footer.requestExit()
-      }
+      footer.requestExit()
     }
 
     const attachSigint = () => {
@@ -436,20 +305,7 @@ export function createRuntimeLifecycle(input: LifecycleInput): Promise<Lifecycle
       sigintRegistered = false
     }
 
-    // Start sigint handling in background
-    queueMicrotask(attachSigint)
-  })
-
-  // Create a minimal footer reference immediately for the close function
-  const minimalFooter = {
-    idle: () => Promise.resolve(),
-    close: () => {},
-    destroy: () => {},
-    currentTheme: () => RUN_THEME_FALLBACK,
-    refreshTheme: () => {},
-  } as unknown as RunFooter
-  
-  let footer: RunFooter = minimalFooter
+    attachSigint()
 
     const close = async (next: {
       showExit: boolean
@@ -466,7 +322,7 @@ export function createRuntimeLifecycle(input: LifecycleInput): Promise<Lifecycle
       let wroteExit = false
 
       try {
-        await (footer || minimalFooter).idle().catch(() => {})
+        await footer.idle().catch(() => {})
 
         const show = renderer.isDestroyed ? false : next.showExit
         if (!renderer.isDestroyed && show) {
@@ -481,17 +337,15 @@ export function createRuntimeLifecycle(input: LifecycleInput): Promise<Lifecycle
                 title: splash.title,
                 session_id: sessionID,
               }),
-              theme: (footer || minimalFooter).currentTheme().splash,
+              theme: footer.currentTheme().splash,
             }),
           )
           await renderer.idle().catch(() => {})
         }
       } finally {
-        if (footer) {
-          footer.close()
-          await footer.idle().catch(() => {})
-          footer.destroy()
-        }
+        footer.close()
+        await footer.idle().catch(() => {})
+        footer.destroy()
         unregisterKeymap?.()
         shutdown(renderer)
         if (!wroteExit) {
@@ -549,12 +403,9 @@ export function createRuntimeLifecycle(input: LifecycleInput): Promise<Lifecycle
       },
       close,
     }
-    } catch (error) {
-      // Cleanup in background
-      queueMicrotask(() => {
-        unregisterKeymap?.()
-        source.cleanup?.()
-      })
-      throw error
-    }
+  } catch (error) {
+    unregisterKeymap?.()
+    source.cleanup?.()
+    throw error
   }
+}

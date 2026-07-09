@@ -9,6 +9,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
+import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js"
 import {
   ListRootsRequestSchema,
   type LoggingMessageNotification,
@@ -227,12 +228,16 @@ const layer = Layer.effect(
 
     const DISABLED_RESULT: CreateResult = { status: { status: "disabled" } }
 
-    const resolveRemoteHeaders = Effect.fn("MCP.resolveRemoteHeaders")(function* (
+    const resolveRemoteRequestOptions = Effect.fn("MCP.resolveRemoteRequestOptions")(function* (
       mcp: ConfigMCPV1.Info & { type: "remote" },
     ) {
       const headers = mcp.headers ? { ...mcp.headers } : {}
       if (mcp.auth?.type !== "bearer" || mcp.auth.provider !== "keycloak") {
-        return { headers: Object.keys(headers).length ? headers : undefined, status: undefined as Status | undefined }
+        return {
+          requestInit: Object.keys(headers).length ? { headers } : undefined,
+          fetch: undefined as FetchLike | undefined,
+          status: undefined as Status | undefined,
+        }
       }
 
       const tokenResult = yield* keycloakAuth.token().pipe(
@@ -242,10 +247,24 @@ const layer = Layer.effect(
         ),
       )
 
-      if (tokenResult.status) return { headers: undefined, status: tokenResult.status }
-      if (!tokenResult.token) return { headers: undefined, status: { status: "needs_auth" } as Status }
+      if (tokenResult.status) return { requestInit: undefined, fetch: undefined, status: tokenResult.status }
+      if (!tokenResult.token) return { requestInit: undefined, fetch: undefined, status: { status: "needs_auth" } as Status }
+
+      const bridge = yield* EffectBridge.make()
+      let tokenPromise: Promise<string | undefined> | undefined
+      const fetch: FetchLike = async (url, init) => {
+        tokenPromise ??= bridge.promise(keycloakAuth.token()).finally(() => {
+          tokenPromise = undefined
+        })
+        const token = await tokenPromise
+        const requestHeaders = new Headers(init?.headers)
+        if (token) requestHeaders.set("Authorization", `Bearer ${token}`)
+        return globalThis.fetch(url, { ...init, headers: requestHeaders })
+      }
+
       return {
-        headers: { ...headers, Authorization: `Bearer ${tokenResult.token}` },
+        requestInit: Object.keys(headers).length ? { headers } : undefined,
+        fetch,
         status: undefined as Status | undefined,
       }
     })
@@ -263,11 +282,11 @@ const layer = Layer.effect(
           status: { status: "failed" as const, error: `Invalid MCP URL for "${key}"` },
         }
       }
-      const remoteHeaders = yield* resolveRemoteHeaders(mcp)
-      if (remoteHeaders.status) {
+      const remoteRequestOptions = yield* resolveRemoteRequestOptions(mcp)
+      if (remoteRequestOptions.status) {
         return {
           client: undefined as MCPClient | undefined,
-          status: remoteHeaders.status,
+          status: remoteRequestOptions.status,
         }
       }
       let authProvider: McpOAuthProvider | undefined
@@ -295,14 +314,16 @@ const layer = Layer.effect(
           name: "StreamableHTTP",
           transport: new StreamableHTTPClientTransport(url, {
             authProvider,
-            requestInit: remoteHeaders.headers ? { headers: remoteHeaders.headers } : undefined,
+            requestInit: remoteRequestOptions.requestInit,
+            fetch: remoteRequestOptions.fetch,
           }),
         },
         {
           name: "SSE",
           transport: new SSEClientTransport(url, {
             authProvider,
-            requestInit: remoteHeaders.headers ? { headers: remoteHeaders.headers } : undefined,
+            requestInit: remoteRequestOptions.requestInit,
+            fetch: remoteRequestOptions.fetch,
           }),
         },
       ]

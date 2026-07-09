@@ -1,5 +1,7 @@
 # MCP Keycloak Bearer Token Expiry Issue
 
+doc
+
 ## Summary
 
 Remote Jaraco Data Mesh MCP calls could start successfully, then later fail with `Token validation failed` after calling a different MCP server that returned an expected authorization error.

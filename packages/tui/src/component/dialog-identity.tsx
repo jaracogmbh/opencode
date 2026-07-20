@@ -12,6 +12,8 @@ import open from "open"
 
 const DEFAULT_SCOPE = "openid profile email offline_access"
 const DEFAULT_REDIRECT_URI = "http://127.0.0.1:19877"
+const DEFAULT_ISSUER = "https://keycloak.jarakube.com/realms/jaraco"
+const DEFAULT_KEYCLOAK_CLIENT_ID = "data-mesh-k8s"
 
 function identityLabel(identity: KeycloakIdentity) {
   if (identity.status === "not_authenticated") return "Not logged in"
@@ -84,8 +86,8 @@ async function promptLogin(input: {
   const issuer = await promptRequired({
     ...input,
     title: "Keycloak issuer URL",
-    placeholder: input.identity.issuer ?? "Configured on server or env",
-    value: input.identity.issuer,
+    placeholder: input.identity.issuer ?? DEFAULT_ISSUER,//"Configured via OPENCODE_KEYCLOAK_ISSUER env var or auth.keycloak.issuer in config",
+    value: input.identity.issuer ?? DEFAULT_ISSUER,
     validate: URL.canParse,
   })
   if (!issuer) return
@@ -93,13 +95,13 @@ async function promptLogin(input: {
   const clientId = await promptRequired({
     ...input,
     title: "Keycloak client ID",
-    placeholder: input.identity.clientId ?? "Configured on server or env",
-    value: input.identity.clientId,
+    placeholder: input.identity.clientId ?? DEFAULT_KEYCLOAK_CLIENT_ID,//"Configured via OPENCODE_KEYCLOAK_CLIENT_ID env var or auth.keycloak.clientId in config",
+    value: input.identity.clientId ?? DEFAULT_KEYCLOAK_CLIENT_ID,
   })
   if (!clientId) return
 
   const scopeInput = await DialogPrompt.show(input.dialog, "Scopes", {
-    placeholder: input.identity.scope ?? DEFAULT_SCOPE,
+    placeholder: input.identity.scope ?? DEFAULT_SCOPE,//"Configured via OPENCODE_KEYCLOAK_SCOPE env var or auth.keycloak.scope in config",
     value: input.identity.scope ?? DEFAULT_SCOPE,
   })
   if (scopeInput === null) return
@@ -110,7 +112,7 @@ async function promptLogin(input: {
   if (clientSecretInput === null) return
 
   const redirectUriInput = await DialogPrompt.show(input.dialog, "Redirect URI", {
-    placeholder: DEFAULT_REDIRECT_URI,
+    placeholder: DEFAULT_REDIRECT_URI,//"Configured via OPENCODE_KEYCLOAK_REDIRECT_URI env var or auth.keycloak.redirectUri in config",
     value: DEFAULT_REDIRECT_URI,
   })
   if (redirectUriInput === null) return

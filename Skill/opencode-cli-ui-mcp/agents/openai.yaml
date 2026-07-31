@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenCode CLI UI MCP"
+  short_description: "OpenCode UI extension and MCP guide"
+  default_prompt: "Use $opencode-cli-ui-mcp to modify OpenCode CLI UI extensions or MCP server communication safely."

@@ -146,6 +146,9 @@ export const Info = Schema.Struct({
           scope: Schema.optional(Schema.String).annotate({
             description: "OAuth2 scopes for Keycloak authentication",
           }),
+          flow: Schema.optional(Schema.Literals(["auto", "pkce", "device"])).annotate({
+            description: "Keycloak login flow to use. 'device' works best for containerized or remote CLI usage.",
+          }),
           redirectUri: Schema.optional(Schema.String).annotate({
             description: "OAuth2 redirect URI for Keycloak authentication",
           }),

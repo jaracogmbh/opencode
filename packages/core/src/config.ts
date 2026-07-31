@@ -68,6 +68,9 @@ export class Info extends Schema.Class<Info>("Config.Info")({
       scope: Schema.String.pipe(Schema.optional).annotate({
         description: "OAuth2 scopes for Keycloak authentication (default: openid profile email offline_access)",
       }),
+      flow: Schema.Literals(["auto", "pkce", "device"]).pipe(Schema.optional).annotate({
+        description: "Keycloak login flow to use. 'device' works best for containerized or remote CLI usage.",
+      }),
       redirectUri: Schema.String.pipe(Schema.optional).annotate({
         description: "OAuth2 redirect URI for Keycloak authentication (default: http://127.0.0.1:19877)",
       }),

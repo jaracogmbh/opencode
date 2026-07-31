@@ -1,5 +1,5 @@
 import { TextAttributes } from "@opentui/core"
-import type { KeycloakAuthLoginInput, KeycloakIdentity } from "@opencode-ai/sdk/v2"
+import type { KeycloakAuthLoginInput, KeycloakIdentity, KeycloakLoginStart } from "@opencode-ai/sdk/v2"
 import { createMemo, onMount } from "solid-js"
 import { useSDK } from "../context/sdk"
 import { useSync } from "../context/sync"
@@ -132,7 +132,7 @@ async function promptLogin(input: {
   }
 }
 
-function WaitingLogin(props: { state: string; authorizationUrl: string }) {
+function WaitingLogin(props: { started: KeycloakLoginStart }) {
   const sdk = useSDK()
   const sync = useSync()
   const dialog = useDialog()
@@ -143,7 +143,7 @@ function WaitingLogin(props: { state: string; authorizationUrl: string }) {
     void sdk.client.identity.keycloak.login
       .finish({
         keycloakLoginFinishInput: {
-          state: props.state,
+          state: props.started.state,
         },
       })
       .then((result) => {
@@ -173,8 +173,11 @@ function WaitingLogin(props: { state: string; authorizationUrl: string }) {
         </text>
       </box>
       <text fg={theme.text}>Waiting for Keycloak authorization</text>
+      {props.started.flow === "device" && props.started.userCode ? (
+        <text fg={theme.text}>Code: {props.started.userCode}</text>
+      ) : undefined}
       <text fg={theme.textMuted} wrapMode="word">
-        {props.authorizationUrl}
+        {props.started.authorizationUrl}
       </text>
     </box>
   )
@@ -221,8 +224,8 @@ export function DialogIdentity() {
     }
 
     const started = result.data
-    void open(started.authorizationUrl).catch(() => undefined)
-    dialog.replace(() => <WaitingLogin state={started.state} authorizationUrl={started.authorizationUrl} />)
+    void open(started.verificationUriComplete || started.verificationUri || started.authorizationUrl).catch(() => undefined)
+    dialog.replace(() => <WaitingLogin started={started} />)
   }
 
   const options = createMemo<DialogSelectOption<string>[]>(() => {

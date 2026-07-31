@@ -1936,7 +1936,7 @@ export class Login extends HeyApiClient {
   /**
    * Start Keycloak login
    *
-   * Start the Keycloak OAuth authorization flow and return the browser authorization URL.
+   * Start the configured Keycloak login flow and return the browser or device authorization details.
    */
   public start<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -1977,7 +1977,7 @@ export class Login extends HeyApiClient {
   /**
    * Finish Keycloak login
    *
-   * Wait for the Keycloak OAuth callback, persist tokens, and return identity status.
+   * Wait for the configured Keycloak login flow to complete, persist tokens, and return identity status.
    */
   public finish<ThrowOnError extends boolean = false>(
     parameters?: {

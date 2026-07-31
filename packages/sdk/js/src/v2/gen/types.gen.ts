@@ -2025,6 +2025,16 @@ export type Config = {
   enterprise?: {
     url?: string
   }
+  auth?: {
+    keycloak?: {
+      issuer?: string
+      clientId?: string
+      clientSecret?: string
+      scope?: string
+      flow?: "auto" | "pkce" | "device"
+      redirectUri?: string
+    }
+  }
   tool_output?: {
     max_lines?: number
     max_bytes?: number
@@ -2331,8 +2341,14 @@ export type KeycloakIdentity = {
 }
 
 export type KeycloakLoginStart = {
+  flow: "auto" | "pkce" | "device"
   authorizationUrl: string
   state: string
+  verificationUri?: string
+  verificationUriComplete?: string
+  userCode?: string
+  expiresInSeconds?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  intervalSeconds?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
 }
 
 export type IdentityError = {
@@ -3891,10 +3907,11 @@ export type ConfigV2ExperimentalPolicy = {
 }
 
 export type KeycloakAuthLoginInput = {
-  issuer: string
-  clientId: string
+  issuer?: string
+  clientId?: string
   clientSecret?: string
   scope?: string
+  flow?: "auto" | "pkce" | "device"
   redirectUri?: string
 }
 

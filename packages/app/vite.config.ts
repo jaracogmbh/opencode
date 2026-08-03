@@ -28,6 +28,6 @@ export default defineConfig({
   },
   build: {
     target: "esnext",
-    sourcemap: true,
+    sourcemap: process.env.OPENCODE_EMBED_BUILD === "1" ? false : true,
   },
 })

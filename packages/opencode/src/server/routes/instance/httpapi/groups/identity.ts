@@ -3,10 +3,22 @@ import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
-import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware/workspace-routing"
+import {
+  WorkspaceRoutingMiddleware,
+  WorkspaceRoutingQuery,
+  WorkspaceRoutingQueryFields,
+} from "../middleware/workspace-routing"
 import { described } from "./metadata"
 
 const root = "/identity/keycloak"
+
+const LoginCallbackQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  state: Schema.String,
+  code: Schema.optional(Schema.String),
+  error: Schema.optional(Schema.String),
+  error_description: Schema.optional(Schema.String),
+})
 
 export class IdentityApiError extends Schema.ErrorClass<IdentityApiError>("IdentityError")(
   {
@@ -22,6 +34,7 @@ export const IdentityPaths = {
   keycloak: root,
   keycloakLoginStart: `${root}/login/start`,
   keycloakLoginFinish: `${root}/login/finish`,
+  keycloakLoginCallback: `${root}/login/callback`,
 } as const
 
 export const IdentityApi = HttpApi.make("identity")
@@ -60,6 +73,17 @@ export const IdentityApi = HttpApi.make("identity")
             identifier: "identity.keycloak.login.finish",
             summary: "Finish Keycloak login",
             description: "Wait for the Keycloak OAuth callback, persist tokens, and return identity status.",
+          }),
+        ),
+        HttpApiEndpoint.get("keycloakLoginCallback", IdentityPaths.keycloakLoginCallback, {
+          query: LoginCallbackQuery,
+          success: described(KeycloakAuth.LoginCallbackResult, "Keycloak browser login callback status"),
+          error: IdentityApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "identity.keycloak.login.callback",
+            summary: "Receive Keycloak browser callback",
+            description: "Receive the Keycloak authorization redirect for browser-hosted OpenCode sessions.",
           }),
         ),
         HttpApiEndpoint.delete("keycloakLogout", IdentityPaths.keycloak, {

@@ -78,9 +78,22 @@ export class LoginFinishInput extends Schema.Class<LoginFinishInput>("KeycloakLo
   state: Schema.String,
 }) {}
 
+export class LoginCallbackInput extends Schema.Class<LoginCallbackInput>("KeycloakLoginCallbackInput")({
+  state: Schema.String,
+  code: Schema.optional(Schema.String),
+  error: Schema.optional(Schema.String),
+  error_description: Schema.optional(Schema.String),
+}) {}
+
+export class LoginCallbackResult extends Schema.Class<LoginCallbackResult>("KeycloakLoginCallbackResult")({
+  success: Schema.Boolean,
+  message: Schema.String,
+}) {}
+
 export interface Interface {
   readonly login: (input: LoginInput, onAuthorization?: (url: string) => void) => Effect.Effect<void, KeycloakAuthError>
   readonly startLogin: (input: LoginInput) => Effect.Effect<LoginStart, KeycloakAuthError>
+  readonly completeCallback: (input: LoginCallbackInput) => Effect.Effect<LoginCallbackResult, KeycloakAuthError>
   readonly finishLogin: (input: LoginFinishInput) => Effect.Effect<Identity, KeycloakAuthError, Auth.Service>
   readonly logout: () => Effect.Effect<void, never, Auth.Service>
   readonly token: () => Effect.Effect<string | undefined, KeycloakAuthError, Auth.Service>
@@ -110,6 +123,7 @@ interface PendingLogin {
   redirectUri: string
   verifier: string
   code: Promise<string>
+  complete?: (input: LoginCallbackInput) => void
 }
 
 const JwtClaims = Schema.Record(Schema.String, Schema.Unknown)
@@ -233,7 +247,11 @@ const layer = Layer.effect(
       const wellKnown = yield* discoverWellKnown(resolved.issuer)
       const state = randomState()
       const pkce = yield* Effect.promise(generatePKCE).pipe(Effect.mapError(toKeycloakError("Failed to generate PKCE")))
-      const codePromise = waitForAuthorizationCode(state, resolved.redirectUri)
+      const useLoopbackCallback = isLoopbackRedirectUri(resolved.redirectUri)
+      const callback = useLoopbackCallback ? undefined : createAuthorizationCodeCallback()
+      const codePromise = useLoopbackCallback
+        ? waitForAuthorizationCode(state, resolved.redirectUri)
+        : callback!.code
       const url = buildAuthorizeUrl(wellKnown.authorization_endpoint, resolved, resolved.redirectUri, state, pkce.challenge)
       void codePromise.catch(() => undefined)
       pending.set(state, {
@@ -242,8 +260,24 @@ const layer = Layer.effect(
         redirectUri: resolved.redirectUri,
         verifier: pkce.verifier,
         code: codePromise,
+        complete: callback?.complete,
       })
       return new LoginStart({ authorizationUrl: url, state })
+    })
+
+    const completeCallback = Effect.fn("KeycloakAuth.completeCallback")(function* (input: LoginCallbackInput) {
+      const current = pending.get(input.state)
+      if (!current) {
+        return yield* new KeycloakAuthError({ message: "No pending Keycloak login found" })
+      }
+      if (!current.complete) {
+        return yield* new KeycloakAuthError({ message: "Keycloak login is waiting on a local callback server" })
+      }
+      current.complete(input)
+      return new LoginCallbackResult({
+        success: !input.error,
+        message: input.error_description || input.error || "Keycloak authorization received. You can close this tab.",
+      })
     })
 
     const finishLogin = Effect.fn("KeycloakAuth.finishLogin")(function* (input: LoginFinishInput) {
@@ -288,6 +322,7 @@ const layer = Layer.effect(
     return Service.of({
       login: login as Interface["login"],
       startLogin: startLogin as Interface["startLogin"],
+      completeCallback: completeCallback as Interface["completeCallback"],
       finishLogin: finishLogin as Interface["finishLogin"],
       logout: logout as Interface["logout"],
       token: token as Interface["token"],
@@ -474,6 +509,41 @@ function waitForAuthorizationCode(expectedState: string, redirectUri: string): P
     })
     server.on("close", () => clearTimeout(timer))
   })
+}
+
+function createAuthorizationCodeCallback() {
+  let settled = false
+  let resolveCode!: (code: string) => void
+  let rejectCode!: (error: Error) => void
+  const code = new Promise<string>((resolve, reject) => {
+    resolveCode = resolve
+    rejectCode = reject
+  })
+  return {
+    code,
+    complete: (input: LoginCallbackInput) => {
+      if (settled) return
+      settled = true
+      if (input.error) {
+        rejectCode(new Error(input.error_description || input.error))
+        return
+      }
+      if (!input.code) {
+        rejectCode(new Error("Missing authorization code"))
+        return
+      }
+      resolveCode(input.code)
+    },
+  }
+}
+
+function isLoopbackRedirectUri(redirectUri: string) {
+  try {
+    const url = new URL(redirectUri)
+    return url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "::1"
+  } catch {
+    return false
+  }
 }
 
 function buildAuthorizeUrl(

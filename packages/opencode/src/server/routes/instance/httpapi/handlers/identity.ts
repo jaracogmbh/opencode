@@ -37,6 +37,21 @@ export const identityHandlers = HttpApiBuilder.group(InstanceHttpApi, "identity"
       return yield* mapIdentityError(keycloak.finishLogin(ctx.payload))
     })
 
+    const keycloakLoginCallback = Effect.fn("IdentityHttpApi.keycloakLoginCallback")(function* (ctx: {
+      query: typeof KeycloakAuth.LoginCallbackInput.Type
+    }) {
+      return yield* mapIdentityError(
+        keycloak.completeCallback(
+          new KeycloakAuth.LoginCallbackInput({
+            state: ctx.query.state,
+            code: ctx.query.code,
+            error: ctx.query.error,
+            error_description: ctx.query.error_description,
+          }),
+        ),
+      )
+    })
+
     const keycloakLogout = Effect.fn("IdentityHttpApi.keycloakLogout")(function* () {
       yield* keycloak.logout()
       return yield* keycloak.identity()
@@ -46,6 +61,7 @@ export const identityHandlers = HttpApiBuilder.group(InstanceHttpApi, "identity"
       .handle("keycloakStatus", keycloakStatus)
       .handle("keycloakLoginStart", keycloakLoginStart)
       .handle("keycloakLoginFinish", keycloakLoginFinish)
+      .handle("keycloakLoginCallback", keycloakLoginCallback)
       .handle("keycloakLogout", keycloakLogout)
   }),
 )

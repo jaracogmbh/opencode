@@ -265,23 +265,8 @@ const layer = Layer.effect(
       return new LoginStart({ authorizationUrl: url, state })
     })
 
-    const completeCallback = Effect.fn("KeycloakAuth.completeCallback")(function* (input: LoginCallbackInput) {
-      const current = pending.get(input.state)
-      if (!current) {
-        return yield* new KeycloakAuthError({ message: "No pending Keycloak login found" })
-      }
-      if (!current.complete) {
-        return yield* new KeycloakAuthError({ message: "Keycloak login is waiting on a local callback server" })
-      }
-      current.complete(input)
-      return new LoginCallbackResult({
-        success: !input.error,
-        message: input.error_description || input.error || "Keycloak authorization received. You can close this tab.",
-      })
-    })
-
-    const finishLogin = Effect.fn("KeycloakAuth.finishLogin")(function* (input: LoginFinishInput) {
-      const current = pending.get(input.state)
+    const finishPendingLogin = Effect.fn("KeycloakAuth.finishPendingLogin")(function* (state: string) {
+      const current = pending.get(state)
       if (!current) {
         return yield* new KeycloakAuthError({ message: "No pending Keycloak login found" })
       }
@@ -310,7 +295,29 @@ const layer = Layer.effect(
           })
           .pipe(Effect.mapError(mapAuthError))
         return yield* identity()
-      }).pipe(Effect.ensuring(Effect.sync(() => pending.delete(input.state))))
+      }).pipe(Effect.ensuring(Effect.sync(() => pending.delete(state))))
+    })
+
+    const completeCallback = Effect.fn("KeycloakAuth.completeCallback")(function* (input: LoginCallbackInput) {
+      const current = pending.get(input.state)
+      if (!current) {
+        return yield* new KeycloakAuthError({ message: "No pending Keycloak login found" })
+      }
+      if (!current.complete) {
+        return yield* new KeycloakAuthError({ message: "Keycloak login is waiting on a local callback server" })
+      }
+      current.complete(input)
+      const result = yield* finishPendingLogin(input.state)
+      return new LoginCallbackResult({
+        success: true,
+        message: result.username
+          ? `Keycloak login completed for ${result.username}. You can close this tab.`
+          : "Keycloak login completed. You can close this tab.",
+      })
+    })
+
+    const finishLogin = Effect.fn("KeycloakAuth.finishLogin")(function* (input: LoginFinishInput) {
+      return yield* finishPendingLogin(input.state)
     })
 
     const login = Effect.fn("KeycloakAuth.login")(function* (input: LoginInput, onAuthorization?: (url: string) => void) {

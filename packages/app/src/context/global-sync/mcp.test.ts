@@ -28,6 +28,10 @@ describe("toggleMcp", () => {
     expect(calls).toEqual(["authenticate", "refresh"])
 
     calls.length = 0
+    await toggleMcp({ ...input("needs_auth"), preferConnectForAuth: true })
+    expect(calls).toEqual(["connect", "refresh"])
+
+    calls.length = 0
     await toggleMcp(input("disabled"))
     expect(calls).toEqual(["connect", "refresh"])
   })

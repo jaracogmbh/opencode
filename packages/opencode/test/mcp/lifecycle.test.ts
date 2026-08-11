@@ -386,6 +386,45 @@ it.instance(
   { config: { mcp: {} } },
 )
 
+it.instance(
+  "connectKeycloakBearerServers connects configured Keycloak bearer MCPs",
+  () =>
+    MCP.Service.use((mcp: MCPNS.Interface) =>
+      Effect.gen(function* () {
+        process.env.OPENCODE_AUTH_CONTENT = JSON.stringify({
+          keycloak: {
+            type: "keycloak",
+            issuer: "https://sso.example.com/realms/engineering",
+            clientId: "opencode-cli",
+            access: "kc-access-token",
+            expires: Date.now() + 5 * 60_000,
+          },
+        })
+        lastCreatedClientName = "keycloak-auto"
+
+        const status = yield* mcp.connectKeycloakBearerServers()
+
+        expect(status["keycloak-auto"]?.status).toBe("connected")
+        expect(streamableHttpOptsByName.get("keycloak-auto")?.authProvider).toBeUndefined()
+        expect(streamableHttpOptsByName.get("keycloak-auto")?.requestInit?.headers).toEqual({
+          Authorization: "Bearer kc-access-token",
+        })
+      }),
+    ),
+  {
+    config: {
+      mcp: {
+        "keycloak-auto": {
+          type: "remote",
+          url: "https://mcp.example.com",
+          auth: { type: "bearer", provider: "keycloak" },
+          oauth: false,
+        },
+      },
+    },
+  },
+)
+
 // ========================================================================
 // Test: tools() are cached after connect
 // ========================================================================

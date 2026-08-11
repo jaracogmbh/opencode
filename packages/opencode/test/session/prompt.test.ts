@@ -130,6 +130,7 @@ function makeMcp(instructions: MCP.ServerInstructions[] = []) {
       finishAuth: () => Effect.die("unexpected MCP auth in prompt-effect tests"),
       removeAuth: () => Effect.void,
       supportsOAuth: () => Effect.succeed(false),
+      connectKeycloakBearerServers: () => Effect.succeed({}),
       hasStoredTokens: () => Effect.succeed(false),
       getAuthStatus: () => Effect.succeed("not_authenticated" as const),
     }),

@@ -52,6 +52,7 @@ const mcp = Layer.succeed(
     finishAuth: () => Effect.die("unexpected MCP auth"),
     removeAuth: () => Effect.void,
     supportsOAuth: () => Effect.succeed(false),
+    connectKeycloakBearerServers: () => Effect.succeed({}),
     hasStoredTokens: () => Effect.succeed(false),
     getAuthStatus: () => Effect.succeed("not_authenticated" as const),
   }),

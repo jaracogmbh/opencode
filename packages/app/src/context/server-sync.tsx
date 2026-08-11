@@ -491,8 +491,18 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
         const key = directoryKey(directory)
         const sdk = sdkFor(key)
         const status = children.child(key, { bootstrap: false })[0].mcp[name].status
+        const mcpConfig = globalStore.config.mcp?.[name]
+        const preferConnectForAuth =
+          typeof mcpConfig === "object" &&
+          mcpConfig !== null &&
+          "type" in mcpConfig &&
+          mcpConfig.type === "remote" &&
+          mcpConfig.oauth === false &&
+          mcpConfig.auth?.type === "bearer" &&
+          mcpConfig.auth.provider === "keycloak"
         await toggleMcp({
           status,
+          preferConnectForAuth,
           connect: async () => {
             await sdk.mcp.connect({ name })
           },

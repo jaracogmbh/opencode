@@ -1,6 +1,6 @@
 # Keycloak Browser Login And Bearer MCP Integration
 
-This document records the OpenCode-side design for browser-hosted Keycloak login and MCP servers that use the logged-in user's Keycloak bearer token.
+This document records the OpenCode-side design for browser-hosted Keycloak login, device-flow Keycloak login, and MCP servers that use the logged-in user's Keycloak bearer token.
 
 It was added after debugging the `jarasite-mgmt` Kubernetes deployment, where OpenCode runs in a pod, the browser runs on the user's machine, and Jaramesh MCP servers require per-user Keycloak authorization.
 
@@ -9,7 +9,7 @@ It was added after debugging the `jarasite-mgmt` Kubernetes deployment, where Op
 OpenCode should own authentication and MCP token usage:
 
 1. A browser user starts Keycloak login from OpenCode.
-2. Keycloak redirects back to OpenCode's browser callback endpoint.
+2. Keycloak either redirects back to OpenCode's browser callback endpoint or the user completes OAuth device authorization in a separate browser.
 3. OpenCode exchanges the authorization code and persists the user's tokens in its normal auth store.
 4. OpenCode auto-connects enabled MCP servers that are configured to use Keycloak bearer auth.
 5. OpenCode injects the current user's Keycloak access token into outgoing MCP HTTP requests.
@@ -60,6 +60,34 @@ POST /identity/keycloak/login/start
 ```
 
 The callback completes login itself. Browser-hosted deployments should not require a manual `POST /identity/keycloak/login/finish` call after the callback.
+
+## Keycloak Device Flow
+
+OpenCode can also start Keycloak OAuth device authorization when `auth.keycloak.flow` or `OPENCODE_KEYCLOAK_FLOW` is `device`, or when `flow` is `auto` and Keycloak discovery advertises `device_authorization_endpoint`.
+
+The flow is:
+
+```text
+POST /identity/keycloak/login/start
+  -> OpenCode requests a device code from Keycloak
+  -> OpenCode returns verification URL, user code, polling interval, expiry, and state
+  -> user opens the verification URL and approves login
+  -> POST /identity/keycloak/login/finish waits for token polling to complete
+  -> OpenCode writes provider "keycloak" to auth.json
+  -> OpenCode reports Keycloak identity as authenticated
+```
+
+This is useful when OpenCode runs in a pod, container, VM, or remote shell where the user's browser cannot reliably reach a localhost callback listener.
+
+Supported flow values:
+
+| Flow | Behavior |
+| --- | --- |
+| `pkce` | Authorization Code + PKCE using loopback or browser-hosted callback support |
+| `device` | OAuth device authorization with verification URL, user code, and token polling |
+| `auto` | Prefer device flow when Keycloak advertises support; otherwise use PKCE |
+
+The default remains `pkce` unless config, environment, or request payload selects a different flow.
 
 ## Auth Storage
 

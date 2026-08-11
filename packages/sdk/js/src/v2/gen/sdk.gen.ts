@@ -88,6 +88,8 @@ import type {
   GlobalHealthResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
+  IdentityKeycloakLoginCallbackErrors,
+  IdentityKeycloakLoginCallbackResponses,
   IdentityKeycloakLoginFinishErrors,
   IdentityKeycloakLoginFinishResponses,
   IdentityKeycloakLoginStartErrors,
@@ -1936,7 +1938,7 @@ export class Login extends HeyApiClient {
   /**
    * Start Keycloak login
    *
-   * Start the Keycloak OAuth authorization flow and return the browser authorization URL.
+   * Start the configured Keycloak login flow and return browser or device authorization details.
    */
   public start<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -1977,7 +1979,7 @@ export class Login extends HeyApiClient {
   /**
    * Finish Keycloak login
    *
-   * Wait for the Keycloak OAuth callback, persist tokens, and return identity status.
+   * Wait for the configured Keycloak login flow to complete, persist tokens, and return identity status.
    */
   public finish<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -2012,6 +2014,48 @@ export class Login extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Receive Keycloak browser callback
+   *
+   * Receive the Keycloak authorization redirect for browser-hosted OpenCode sessions.
+   */
+  public callback<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      state: string
+      code?: string
+      error?: string
+      error_description?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "state" },
+            { in: "query", key: "code" },
+            { in: "query", key: "error" },
+            { in: "query", key: "error_description" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      IdentityKeycloakLoginCallbackResponses,
+      IdentityKeycloakLoginCallbackErrors,
+      ThrowOnError
+    >({
+      url: "/identity/keycloak/login/callback",
+      ...options,
+      ...params,
     })
   }
 }

@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { afterEach, describe, expect } from "bun:test"
 import { Context, Layer, Effect } from "effect"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import { IdentityPaths } from "../../src/server/routes/instance/httpapi/groups/identity"
@@ -23,6 +23,12 @@ function jwt(claims: Record<string, unknown>) {
 }
 
 describe("identity HttpApi", () => {
+  const originalFetch = globalThis.fetch
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+  })
+
   const request = Effect.fnUntraced(function* (route: string, directory: string, init?: RequestInit) {
     const headers = new Headers(init?.headers)
     headers.set("x-opencode-directory", directory)
@@ -49,6 +55,9 @@ describe("identity HttpApi", () => {
       expect(yield* Effect.promise(() => response.json())).toEqual({
         provider: "keycloak",
         status: "not_authenticated",
+        issuer: null,
+        clientId: null,
+        scope: "openid profile email offline_access",
       })
     }),
   )
@@ -94,6 +103,66 @@ describe("identity HttpApi", () => {
       expect(body).not.toHaveProperty("access")
       expect(body).not.toHaveProperty("refresh")
       expect(body).not.toHaveProperty("clientSecret")
+    }),
+  )
+
+  it.instance("starts Keycloak device login", () =>
+    Effect.gen(function* () {
+      globalThis.fetch = (async (request, init) => {
+        const url = typeof request === "string" ? request : request instanceof URL ? request.toString() : request.url
+        if (url.endsWith("/.well-known/openid-configuration")) {
+          return new Response(
+            JSON.stringify({
+              authorization_endpoint: "https://sso.example.com/auth",
+              token_endpoint: "https://sso.example.com/token",
+              device_authorization_endpoint: "https://sso.example.com/device",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          )
+        }
+
+        if (url === "https://sso.example.com/device") {
+          const body = init?.body instanceof URLSearchParams ? init.body.toString() : String(init?.body)
+          expect(body).toContain("client_id=opencode-cli")
+          return new Response(
+            JSON.stringify({
+              device_code: "device-code",
+              user_code: "ABCD-EFGH",
+              verification_uri: "https://sso.example.com/verify",
+              verification_uri_complete: "https://sso.example.com/verify?user_code=ABCD-EFGH",
+              expires_in: 600,
+              interval: 1,
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          )
+        }
+
+        throw new Error(`unexpected fetch ${url}`)
+      }) as typeof fetch
+
+      const tmp = yield* TestInstance
+      const response = yield* request(IdentityPaths.keycloakLoginStart, tmp.directory, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          issuer: "https://sso.example.com/realms/dev",
+          clientId: "opencode-cli",
+          flow: "device",
+        }),
+      })
+      const body = yield* Effect.promise(() => response.json())
+
+      expect(response.status).toBe(200)
+      expect(body).toEqual({
+        flow: "device",
+        authorizationUrl: "https://sso.example.com/verify?user_code=ABCD-EFGH",
+        state: expect.any(String),
+        verificationUri: "https://sso.example.com/verify",
+        verificationUriComplete: "https://sso.example.com/verify?user_code=ABCD-EFGH",
+        userCode: "ABCD-EFGH",
+        expiresInSeconds: 600,
+        intervalSeconds: 1,
+      })
     }),
   )
 })

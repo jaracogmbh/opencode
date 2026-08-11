@@ -54,13 +54,13 @@ export const IdentityApi = HttpApi.make("identity")
         HttpApiEndpoint.post("keycloakLoginStart", IdentityPaths.keycloakLoginStart, {
           query: WorkspaceRoutingQuery,
           payload: KeycloakAuth.LoginInput,
-          success: described(KeycloakAuth.LoginStart, "Keycloak login authorization URL"),
+          success: described(KeycloakAuth.LoginStart, "Keycloak login authorization details"),
           error: IdentityApiError,
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "identity.keycloak.login.start",
             summary: "Start Keycloak login",
-            description: "Start the Keycloak OAuth authorization flow and return the browser authorization URL.",
+            description: "Start the configured Keycloak login flow and return browser or device authorization details.",
           }),
         ),
         HttpApiEndpoint.post("keycloakLoginFinish", IdentityPaths.keycloakLoginFinish, {
@@ -72,7 +72,7 @@ export const IdentityApi = HttpApi.make("identity")
           OpenApi.annotations({
             identifier: "identity.keycloak.login.finish",
             summary: "Finish Keycloak login",
-            description: "Wait for the Keycloak OAuth callback, persist tokens, and return identity status.",
+            description: "Wait for the configured Keycloak login flow to complete, persist tokens, and return identity status.",
           }),
         ),
         HttpApiEndpoint.get("keycloakLoginCallback", IdentityPaths.keycloakLoginCallback, {

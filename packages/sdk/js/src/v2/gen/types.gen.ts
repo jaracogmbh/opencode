@@ -2025,6 +2025,16 @@ export type Config = {
   enterprise?: {
     url?: string
   }
+  auth?: {
+    keycloak?: {
+      issuer?: string
+      clientId?: string
+      clientSecret?: string
+      scope?: string
+      flow?: "auto" | "pkce" | "device"
+      redirectUri?: string
+    }
+  }
   tool_output?: {
     max_lines?: number
     max_bytes?: number
@@ -2331,8 +2341,14 @@ export type KeycloakIdentity = {
 }
 
 export type KeycloakLoginStart = {
+  flow: "auto" | "pkce" | "device"
   authorizationUrl: string
   state: string
+  verificationUri?: string
+  verificationUriComplete?: string
+  userCode?: string
+  expiresInSeconds?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  intervalSeconds?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
 }
 
 export type IdentityError = {
@@ -2344,6 +2360,11 @@ export type IdentityError = {
 
 export type KeycloakLoginFinishInput = {
   state: string
+}
+
+export type KeycloakLoginCallbackResult = {
+  success: boolean
+  message: string
 }
 
 export type Path = {
@@ -3891,10 +3912,11 @@ export type ConfigV2ExperimentalPolicy = {
 }
 
 export type KeycloakAuthLoginInput = {
-  issuer: string
-  clientId: string
+  issuer?: string
+  clientId?: string
   clientSecret?: string
   scope?: string
+  flow?: "auto" | "pkce" | "device"
   redirectUri?: string
 }
 
@@ -8212,7 +8234,7 @@ export type IdentityKeycloakLoginStartError = IdentityKeycloakLoginStartErrors[k
 
 export type IdentityKeycloakLoginStartResponses = {
   /**
-   * Keycloak login authorization URL
+   * Keycloak login authorization details
    */
   200: KeycloakLoginStart
 }
@@ -8249,6 +8271,40 @@ export type IdentityKeycloakLoginFinishResponses = {
 
 export type IdentityKeycloakLoginFinishResponse =
   IdentityKeycloakLoginFinishResponses[keyof IdentityKeycloakLoginFinishResponses]
+
+export type IdentityKeycloakLoginCallbackData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    state: string
+    code?: string
+    error?: string
+    error_description?: string
+  }
+  url: "/identity/keycloak/login/callback"
+}
+
+export type IdentityKeycloakLoginCallbackErrors = {
+  /**
+   * IdentityError | InvalidRequestError
+   */
+  400: IdentityError | InvalidRequestError
+}
+
+export type IdentityKeycloakLoginCallbackError =
+  IdentityKeycloakLoginCallbackErrors[keyof IdentityKeycloakLoginCallbackErrors]
+
+export type IdentityKeycloakLoginCallbackResponses = {
+  /**
+   * Keycloak browser login callback status
+   */
+  200: KeycloakLoginCallbackResult
+}
+
+export type IdentityKeycloakLoginCallbackResponse =
+  IdentityKeycloakLoginCallbackResponses[keyof IdentityKeycloakLoginCallbackResponses]
 
 export type InstanceDisposeData = {
   body?: never

@@ -52,18 +52,22 @@ const keycloakLogin = Effect.fn("Cli.providers.keycloakLogin")(
     const spinner = Prompt.spinner()
     yield* spinner.start("Starting Keycloak login...")
 
-    let authorizationUrl: string | undefined
-    yield* keycloak.login(
-      new KeycloakAuth.LoginInput({}),
-      (url) => {
-        authorizationUrl = url
-        UI.println(`Open this URL to authorize: ${url}`)
-        void open(url).catch(() => undefined)
-      },
-    )
+    let started: KeycloakAuth.LoginStart | undefined
+    yield* keycloak.login(new KeycloakAuth.LoginInput({}), (value) => {
+      started = value
+      if (value.flow === "device") {
+        UI.println(`Open this URL to authorize: ${value.authorizationUrl}`)
+        if (value.userCode) UI.println(`Enter this code: ${value.userCode}`)
+        void open(value.verificationUriComplete || value.verificationUri || value.authorizationUrl).catch(() => undefined)
+        return
+      }
+
+      UI.println(`Open this URL to authorize: ${value.authorizationUrl}`)
+      void open(value.authorizationUrl).catch(() => undefined)
+    })
 
     yield* spinner.stop("Login successful")
-    if (!authorizationUrl) {
+    if (!started) {
       yield* Prompt.log.warn("Login completed without reporting an authorization URL")
     }
     yield* Prompt.outro("Done")

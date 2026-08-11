@@ -2025,3 +2025,25 @@ test("parseManagedPlist handles empty config", async () => {
   )
   expect(config.$schema).toBe("https://opencode.ai/config.json")
 })
+
+test("parses keycloak auth flow config", () => {
+  const config = ConfigParse.schema(
+    ConfigV1.Info,
+    ConfigParse.jsonc(
+      JSON.stringify({
+        $schema: "https://opencode.ai/config.json",
+        auth: {
+          keycloak: {
+            issuer: "https://sso.example.com/realms/dev",
+            clientId: "opencode-cli",
+            flow: "device",
+          },
+        },
+      }),
+      "test:keycloak-flow",
+    ),
+    "test:keycloak-flow",
+  )
+
+  expect(config.auth?.keycloak?.flow).toBe("device")
+})

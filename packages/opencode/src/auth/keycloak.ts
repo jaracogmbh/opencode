@@ -24,13 +24,18 @@ const ENV_ISSUER = "OPENCODE_KEYCLOAK_ISSUER"
 const ENV_CLIENT_ID = "OPENCODE_KEYCLOAK_CLIENT_ID"
 const ENV_CLIENT_SECRET = "OPENCODE_KEYCLOAK_CLIENT_SECRET"
 const ENV_SCOPE = "OPENCODE_KEYCLOAK_SCOPE"
+const ENV_FLOW = "OPENCODE_KEYCLOAK_FLOW"
 const ENV_REDIRECT_URI = "OPENCODE_KEYCLOAK_REDIRECT_URI"
+
+export const LoginFlow = Schema.Literals(["auto", "pkce", "device"])
+export type LoginFlow = typeof LoginFlow.Type
 
 export class LoginInput extends Schema.Class<LoginInput>("KeycloakAuth.LoginInput")({
   issuer: Schema.String.pipe(Schema.optional),
   clientId: Schema.String.pipe(Schema.optional),
   clientSecret: Schema.optional(Schema.String),
   scope: Schema.optional(Schema.String),
+  flow: Schema.optional(LoginFlow),
   redirectUri: Schema.optional(Schema.String),
 }) {}
 
@@ -39,6 +44,7 @@ type ResolvedLoginInput = {
   clientId: string
   clientSecret?: string
   scope?: string
+  flow: LoginFlow
   redirectUri: string
 }
 
@@ -70,8 +76,14 @@ type IdentityDefaults = {
 }
 
 export class LoginStart extends Schema.Class<LoginStart>("KeycloakLoginStart")({
+  flow: LoginFlow,
   authorizationUrl: Schema.String,
   state: Schema.String,
+  verificationUri: Schema.optional(Schema.String),
+  verificationUriComplete: Schema.optional(Schema.String),
+  userCode: Schema.optional(Schema.String),
+  expiresInSeconds: Schema.optional(Schema.Number),
+  intervalSeconds: Schema.optional(Schema.Number),
 }) {}
 
 export class LoginFinishInput extends Schema.Class<LoginFinishInput>("KeycloakLoginFinishInput")({
@@ -91,7 +103,7 @@ export class LoginCallbackResult extends Schema.Class<LoginCallbackResult>("Keyc
 }) {}
 
 export interface Interface {
-  readonly login: (input: LoginInput, onAuthorization?: (url: string) => void) => Effect.Effect<void, KeycloakAuthError>
+  readonly login: (input: LoginInput, onStart?: (start: LoginStart) => void) => Effect.Effect<void, KeycloakAuthError>
   readonly startLogin: (input: LoginInput) => Effect.Effect<LoginStart, KeycloakAuthError>
   readonly completeCallback: (input: LoginCallbackInput) => Effect.Effect<LoginCallbackResult, KeycloakAuthError>
   readonly finishLogin: (input: LoginFinishInput) => Effect.Effect<Identity, KeycloakAuthError, Auth.Service>
@@ -108,6 +120,7 @@ export const use = serviceUse(Service)
 interface WellKnown {
   authorization_endpoint: string
   token_endpoint: string
+  device_authorization_endpoint?: string
 }
 
 interface TokenResponse {
@@ -115,16 +128,37 @@ interface TokenResponse {
   refresh_token?: string
   expires_in?: number
   scope?: string
+  error?: string
+  error_description?: string
 }
 
-interface PendingLogin {
+interface DeviceAuthorizationResponse {
+  device_code?: string
+  user_code?: string
+  verification_uri?: string
+  verification_uri_complete?: string
+  expires_in?: number
+  interval?: number
+}
+
+interface PendingPkceLogin {
   input: ResolvedLoginInput
   wellKnown: WellKnown
+  flow: "pkce"
   redirectUri: string
   verifier: string
   code: Promise<string>
   complete?: (input: LoginCallbackInput) => void
 }
+
+interface PendingDeviceLogin {
+  input: ResolvedLoginInput
+  wellKnown: WellKnown
+  flow: "device"
+  tokens: Promise<{ access: string; refresh?: string; expires: number; scope?: string }>
+}
+
+type PendingLogin = PendingPkceLogin | PendingDeviceLogin
 
 const JwtClaims = Schema.Record(Schema.String, Schema.Unknown)
 const decodeJwtClaims = Schema.decodeUnknownOption(Schema.fromJsonString(JwtClaims))
@@ -219,6 +253,7 @@ const layer = Layer.effect(
       const resolvedClientId = input.clientId || configAuth?.clientId || process.env[ENV_CLIENT_ID]
       const resolvedClientSecret = input.clientSecret || configAuth?.clientSecret || process.env[ENV_CLIENT_SECRET]
       const resolvedScope = input.scope || configAuth?.scope || process.env[ENV_SCOPE] || DEFAULT_SCOPE
+      const resolvedFlow = input.flow || decodeLoginFlow(configAuth?.flow || process.env[ENV_FLOW]) || "pkce"
       const resolvedRedirectUri = input.redirectUri || configAuth?.redirectUri || process.env[ENV_REDIRECT_URI] || DEFAULT_REDIRECT_URI
 
       // Validate required fields
@@ -241,11 +276,36 @@ const layer = Layer.effect(
         clientId: resolvedClientId,
         clientSecret: resolvedClientSecret,
         scope: resolvedScope,
+        flow: resolvedFlow,
         redirectUri: resolvedRedirectUri,
       }
 
       const wellKnown = yield* discoverWellKnown(resolved.issuer)
       const state = randomState()
+      const flow = yield* resolveLoginFlow(resolved.flow, wellKnown)
+
+      if (flow === "device") {
+        const device = yield* startDeviceAuthorization(wellKnown, resolved)
+        const tokens = pollDeviceTokens(wellKnown, resolved, device)
+        void tokens.catch(() => undefined)
+        pending.set(state, {
+          input: resolved,
+          wellKnown,
+          flow,
+          tokens,
+        })
+        return new LoginStart({
+          flow,
+          state,
+          authorizationUrl: device.verification_uri_complete || device.verification_uri!,
+          verificationUri: device.verification_uri,
+          verificationUriComplete: device.verification_uri_complete,
+          userCode: device.user_code,
+          expiresInSeconds: device.expires_in,
+          intervalSeconds: device.interval,
+        })
+      }
+
       const pkce = yield* Effect.promise(generatePKCE).pipe(Effect.mapError(toKeycloakError("Failed to generate PKCE")))
       const useLoopbackCallback = isLoopbackRedirectUri(resolved.redirectUri)
       const callback = useLoopbackCallback ? undefined : createAuthorizationCodeCallback()
@@ -257,12 +317,13 @@ const layer = Layer.effect(
       pending.set(state, {
         input: resolved,
         wellKnown,
+        flow,
         redirectUri: resolved.redirectUri,
         verifier: pkce.verifier,
         code: codePromise,
         complete: callback?.complete,
       })
-      return new LoginStart({ authorizationUrl: url, state })
+      return new LoginStart({ flow, authorizationUrl: url, state })
     })
 
     const finishPendingLogin = Effect.fn("KeycloakAuth.finishPendingLogin")(function* (state: string) {
@@ -272,16 +333,7 @@ const layer = Layer.effect(
       }
 
       return yield* Effect.gen(function* () {
-        const code = yield* Effect.promise(() => current.code).pipe(
-          Effect.mapError((error) => new KeycloakAuthError({ message: errorMessage(error) })),
-        )
-        const exchanged = yield* exchangeCode(
-          current.wellKnown,
-          current.input,
-          current.redirectUri,
-          code,
-          current.verifier,
-        )
+        const exchanged = yield* resolvePendingLogin(current)
         yield* auth
           .set(PROVIDER_ID, {
             type: "keycloak",
@@ -303,6 +355,9 @@ const layer = Layer.effect(
       if (!current) {
         return yield* new KeycloakAuthError({ message: "No pending Keycloak login found" })
       }
+      if (current.flow === "device") {
+        return yield* new KeycloakAuthError({ message: "Keycloak login is using device authorization flow" })
+      }
       if (!current.complete) {
         return yield* new KeycloakAuthError({ message: "Keycloak login is waiting on a local callback server" })
       }
@@ -320,9 +375,9 @@ const layer = Layer.effect(
       return yield* finishPendingLogin(input.state)
     })
 
-    const login = Effect.fn("KeycloakAuth.login")(function* (input: LoginInput, onAuthorization?: (url: string) => void) {
+    const login = Effect.fn("KeycloakAuth.login")(function* (input: LoginInput, onStart?: (start: LoginStart) => void) {
       const started = yield* startLogin(input)
-      onAuthorization?.(started.authorizationUrl)
+      onStart?.(started)
       yield* finishLogin(new LoginFinishInput({ state: started.state }))
     })
 
@@ -389,6 +444,7 @@ function discoverWellKnown(issuer: string) {
       }
       return {
         authorization_endpoint: json.authorization_endpoint,
+        device_authorization_endpoint: json.device_authorization_endpoint,
         token_endpoint: json.token_endpoint,
       } satisfies WellKnown
     },
@@ -455,6 +511,90 @@ function refreshTokens(
     },
     catch: toKeycloakError("Failed to refresh Keycloak token"),
   })
+}
+
+function startDeviceAuthorization(wellKnown: WellKnown, input: ResolvedLoginInput) {
+  if (!wellKnown.device_authorization_endpoint) {
+    return Effect.fail(new KeycloakAuthError({ message: "Keycloak device authorization is not available for this issuer" }))
+  }
+
+  return Effect.tryPromise({
+    try: async () => {
+      const response = await fetch(wellKnown.device_authorization_endpoint!, {
+        method: "POST",
+        headers: tokenHeaders(),
+        body: new URLSearchParams({
+          client_id: input.clientId,
+          scope: input.scope || DEFAULT_SCOPE,
+          ...(input.clientSecret ? { client_secret: input.clientSecret } : {}),
+        }).toString(),
+      })
+      if (!response.ok) throw new Error(`Device authorization failed: ${response.status}`)
+      const json = (await response.json()) as DeviceAuthorizationResponse
+      if (!json.device_code || !json.user_code || !json.verification_uri) {
+        throw new Error("Device authorization response is missing required fields")
+      }
+      return json
+    },
+    catch: toKeycloakError("Failed to start Keycloak device authorization"),
+  })
+}
+
+function pollDeviceTokens(
+  wellKnown: WellKnown,
+  input: ResolvedLoginInput,
+  device: DeviceAuthorizationResponse,
+): Promise<{ access: string; refresh?: string; expires: number; scope?: string }> {
+  return new Promise((resolve, reject) => {
+    const expiresAt = Date.now() + Math.max(0, device.expires_in ?? 300) * 1000
+
+    const poll = async (intervalMs: number) => {
+      if (Date.now() >= expiresAt) {
+        reject(new Error("Device authorization expired before login completed"))
+        return
+      }
+
+      await sleep(intervalMs)
+
+      try {
+        const response = await fetch(wellKnown.token_endpoint, {
+          method: "POST",
+          headers: tokenHeaders(),
+          body: new URLSearchParams({
+            grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+            device_code: device.device_code ?? "",
+            client_id: input.clientId,
+            ...(input.clientSecret ? { client_secret: input.clientSecret } : {}),
+          }).toString(),
+        })
+        const tokens = (await response.json()) as TokenResponse
+        if (response.ok) {
+          if (!tokens.access_token) {
+            reject(new Error("Device authorization response is missing access_token"))
+            return
+          }
+          resolve(normalizeTokens(tokens))
+          return
+        }
+
+        const nextInterval = nextDevicePollInterval(intervalMs, tokens)
+        if (nextInterval === undefined) {
+          reject(new Error(tokens.error_description || tokens.error || `Device token polling failed: ${response.status}`))
+          return
+        }
+        void poll(nextInterval)
+      } catch (error) {
+        reject(error)
+      }
+    }
+
+    void poll(Math.max(1, device.interval ?? 5) * 1000)
+  })
+}
+
+function nextDevicePollInterval(intervalMs: number, tokens: TokenResponse) {
+  if (tokens.error === "authorization_pending") return intervalMs
+  if (tokens.error === "slow_down") return intervalMs + 5000
 }
 
 function waitForAuthorizationCode(expectedState: string, redirectUri: string): Promise<string> {
@@ -553,6 +693,19 @@ function isLoopbackRedirectUri(redirectUri: string) {
   }
 }
 
+function resolvePendingLogin(current: PendingLogin) {
+  if (current.flow === "device") {
+    return Effect.promise(() => current.tokens).pipe(
+      Effect.mapError((error) => new KeycloakAuthError({ message: errorMessage(error) })),
+    )
+  }
+
+  return Effect.gen(function* () {
+    const code = yield* Effect.promise(() => current.code)
+    return yield* exchangeCode(current.wellKnown, current.input, current.redirectUri, code, current.verifier)
+  }).pipe(Effect.mapError((error) => new KeycloakAuthError({ message: errorMessage(error) })))
+}
+
 function buildAuthorizeUrl(
   endpoint: string,
   input: ResolvedLoginInput,
@@ -572,10 +725,29 @@ function buildAuthorizeUrl(
   return `${endpoint}?${params.toString()}`
 }
 
+function resolveLoginFlow(flow: LoginFlow, wellKnown: WellKnown): Effect.Effect<Exclude<LoginFlow, "auto">, KeycloakAuthError> {
+  if (flow === "device") {
+    if (!wellKnown.device_authorization_endpoint) {
+      return Effect.fail(new KeycloakAuthError({ message: "Keycloak device authorization is not available for this issuer" }))
+    }
+    return Effect.succeed(flow)
+  }
+  if (flow === "auto" && wellKnown.device_authorization_endpoint) return Effect.succeed("device")
+  return Effect.succeed("pkce")
+}
+
+function decodeLoginFlow(value: string | undefined): LoginFlow | undefined {
+  if (value === "auto" || value === "pkce" || value === "device") return value
+}
+
 async function generatePKCE() {
   const verifier = randomString(64)
   const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))
   return { verifier, challenge: base64UrlEncode(hash) }
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function normalizeTokens(tokens: TokenResponse) {

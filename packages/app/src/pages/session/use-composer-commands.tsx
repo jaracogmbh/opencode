@@ -2,6 +2,7 @@ import { useCommand, type CommandOption } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { useLocal } from "@/context/local"
 import { useSettings } from "@/context/settings"
+import { useSync } from "@/context/sync"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useSessionLayout } from "./session-layout"
 import { createSessionOwnership } from "./session-ownership"
@@ -19,16 +20,26 @@ export const useComposerCommands = () => {
   const language = useLanguage()
   const local = useLocal()
   const settings = useSettings()
+  const sync = useSync()
   const { sessionKey } = useSessionLayout()
   const sessionOwnership = createSessionOwnership(sessionKey)
   const modelCommand = withCategory(language.t("command.category.model"))
   const agentCommand = withCategory(language.t("command.category.agent"))
+  const settingsCommand = withCategory(language.t("command.category.settings"))
 
   const chooseModel = async () => {
     const owner = sessionOwnership.capture()
     const { DialogSelectModel } = await import("@/components/dialog-select-model")
     owner.run(() => {
       void dialog.show(() => <DialogSelectModel model={local.model} />)
+    })
+  }
+
+  const openIdentity = async () => {
+    const owner = sessionOwnership.capture()
+    const { DialogIdentity } = await import("@/components/dialog-identity")
+    owner.run(() => {
+      void dialog.show(() => <DialogIdentity />)
     })
   }
 
@@ -64,6 +75,14 @@ export const useComposerCommands = () => {
       keybind: "shift+mod+.",
       disabled: !settings.visibility.customAgents(),
       onSelect: () => local.agent.move(-1),
+    }),
+    settingsCommand({
+      id: "identity.open",
+      title: language.t("command.identity.open"),
+      description: language.t("command.identity.open.description"),
+      slash: "identity",
+      suggested: sync().data.identity.status === "expired",
+      onSelect: () => void openIdentity(),
     }),
   ])
 }

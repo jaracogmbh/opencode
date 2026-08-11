@@ -4,7 +4,7 @@ import { QueryClient } from "@tanstack/solid-query"
 import type { Config, OpencodeClient, Project } from "@opencode-ai/sdk/v2/client"
 import type { NormalizedProviderListResponse } from "@opencode-ai/session-ui/context"
 import { bootstrapDirectory, loadPathQuery, loadProvidersQuery } from "./bootstrap"
-import type { State, VcsCache } from "./types"
+import { EMPTY_KEYCLOAK_IDENTITY, type State, type VcsCache } from "./types"
 import { ServerScope } from "@/utils/server-scope"
 
 const provider = { all: new Map(), connected: [], default: {} } satisfies NormalizedProviderListResponse
@@ -16,6 +16,7 @@ describe("bootstrapDirectory", () => {
       status: "loading",
       agent: [],
       command: [],
+      identity: EMPTY_KEYCLOAK_IDENTITY,
       reference: [],
       project: "",
       projectMeta: undefined,
@@ -59,6 +60,7 @@ describe("bootstrapDirectory", () => {
       sdk: {
         app: { agents: async () => ({ data: [{ name: "build", mode: "primary" }] }) },
         config: { get: async () => ({ data: {} }) },
+        identity: { keycloak: { status: async () => ({ data: EMPTY_KEYCLOAK_IDENTITY }) } },
         session: { status: async () => ({ data: {} }) },
         vcs: { get: async () => ({ data: undefined }) },
         command: {

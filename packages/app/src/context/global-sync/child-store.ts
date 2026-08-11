@@ -3,6 +3,7 @@ import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
 import { Persist, persisted } from "@/utils/persist"
 import type { VcsInfo } from "@opencode-ai/sdk/v2/client"
 import {
+  EMPTY_KEYCLOAK_IDENTITY,
   DIR_IDLE_TTL_MS,
   MAX_DIR_STORES,
   type ChildOptions,
@@ -212,6 +213,7 @@ export function createChildStoreManager(input: {
             status: "loading" as const,
             agent: [],
             command: [],
+            identity: EMPTY_KEYCLOAK_IDENTITY,
             get reference() {
               return referenceQuery.isLoading ? [] : (referenceQuery.data ?? [])
             },

@@ -2,6 +2,7 @@ import type {
   Agent,
   Command,
   Config,
+  KeycloakIdentity,
   LspStatus,
   McpResource,
   McpStatus,
@@ -36,6 +37,7 @@ export type State = {
   status: "loading" | "partial" | "complete"
   agent: Agent[]
   command: Command[]
+  identity: KeycloakIdentity
   reference: ReferenceInfo[]
   project: string
   projectMeta: ProjectMeta | undefined
@@ -82,6 +84,11 @@ export type State = {
   part_text_accum_delta: {
     [partID: string]: string
   }
+}
+
+export const EMPTY_KEYCLOAK_IDENTITY: KeycloakIdentity = {
+  provider: "keycloak",
+  status: "not_authenticated",
 }
 
 export type VcsCache = {

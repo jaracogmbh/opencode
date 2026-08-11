@@ -138,6 +138,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   const terminalCommand = withCategory(language.t("command.category.terminal"))
   const mcpCommand = withCategory(language.t("command.category.mcp"))
   const permissionsCommand = withCategory(language.t("command.category.permissions"))
+  const settingsCommand = withCategory(language.t("command.category.settings"))
 
   const isAutoAcceptActive = () => {
     const sessionID = params.id
@@ -237,6 +238,10 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       () => import("@/components/dialog-select-file"),
       (x) => dialog.show(() => <x.DialogSelectFile onOpenFile={showAllFiles} />),
     )
+  }
+
+  const openIdentity = () => {
+    void openDialog(() => import("@/components/dialog-identity"), (x) => dialog.show(() => <x.DialogIdentity />))
   }
 
   const closeTab = () => {
@@ -569,6 +574,17 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     }),
   ]
 
+  const settingsCmds = () => [
+    settingsCommand({
+      id: "identity.open",
+      title: language.t("command.identity.open"),
+      description: language.t("command.identity.open.description"),
+      slash: "identity",
+      suggested: sync().data.identity.status === "expired",
+      onSelect: openIdentity,
+    }),
+  ]
+
   command.register("session", () => [
     ...sessionCmds(),
     ...shareCmds(),
@@ -579,5 +595,6 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     ...messageCmds(),
     ...mcpCmds(),
     ...permissionsCmds(),
+    ...settingsCmds(),
   ])
 }

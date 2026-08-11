@@ -14,7 +14,7 @@ import { getFilename } from "@opencode-ai/core/util/path"
 import { retry } from "@opencode-ai/core/util/retry"
 import { batch } from "solid-js"
 import { produce, reconcile, type SetStoreFunction, type Store } from "solid-js/store"
-import type { State, VcsCache } from "./types"
+import { EMPTY_KEYCLOAK_IDENTITY, type State, type VcsCache } from "./types"
 import type { ServerSession } from "../server-session"
 import { cmp, normalizeAgentList, normalizeProviderList } from "./utils"
 import { formatServerError } from "@/utils/server-errors"
@@ -284,6 +284,7 @@ export async function bootstrapDirectory(input: {
             if (next) input.vcsCache.setStore("value", next)
           }),
         ),
+      () => retry(() => input.sdk.identity.keycloak.status().then((x) => input.setStore("identity", x.data ?? EMPTY_KEYCLOAK_IDENTITY))),
       input.mcp && (() => retry(() => input.sdk.command.list().then((x) => input.setStore("command", x.data ?? [])))),
       () => input.queryClient.fetchQuery(loadReferencesQuery(input.scope, input.directory, input.sdk)),
       () =>

@@ -188,6 +188,7 @@ export interface Interface {
   readonly finishAuth: (mcpName: string, authorizationCode: string) => Effect.Effect<Status, NotFoundError>
   readonly removeAuth: (mcpName: string) => Effect.Effect<void>
   readonly supportsOAuth: (mcpName: string) => Effect.Effect<boolean, NotFoundError>
+  readonly connectKeycloakBearerServers: () => Effect.Effect<Record<string, Status>>
   readonly hasStoredTokens: (mcpName: string) => Effect.Effect<boolean>
   readonly getAuthStatus: (mcpName: string) => Effect.Effect<AuthStatus>
 }
@@ -249,6 +250,11 @@ const layer = Layer.effect(
 
       if (tokenResult.status) return { requestInit: undefined, fetch: undefined, status: tokenResult.status }
       if (!tokenResult.token) return { requestInit: undefined, fetch: undefined, status: { status: "needs_auth" } as Status }
+
+      for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === "authorization") delete headers[key]
+      }
+      headers.Authorization = `Bearer ${tokenResult.token}`
 
       const bridge = yield* EffectBridge.make()
       let tokenPromise: Promise<string | undefined> | undefined
@@ -459,6 +465,10 @@ const layer = Layer.effect(
       }),
     )
     const cfgSvc = yield* Config.Service
+
+    function isKeycloakBearerRemote(mcp: ConfigMCPV1.Info): mcp is ConfigMCPV1.Info & { type: "remote" } {
+      return mcp.type === "remote" && mcp.auth?.type === "bearer" && mcp.auth.provider === "keycloak"
+    }
 
     const descendants = Effect.fnUntraced(
       function* (pid: number) {
@@ -694,6 +704,31 @@ const layer = Layer.effect(
     const connect = Effect.fn("MCP.connect")(function* (name: string) {
       const mcp = yield* requireMcpConfig(name)
       yield* createAndStore(name, { ...mcp, enabled: true })
+    })
+
+    const connectKeycloakBearerServers = Effect.fn("MCP.connectKeycloakBearerServers")(function* () {
+      const cfg = yield* cfgSvc.get()
+      const s = yield* InstanceState.get(state)
+      const config = { ...(cfg.mcp ?? {}), ...s.config }
+
+      yield* Effect.forEach(
+        Object.entries(config),
+        ([name, mcp]) =>
+          Effect.gen(function* () {
+            if (!isMcpConfigured(mcp)) return
+            if (mcp.enabled === false) return
+            if (!isKeycloakBearerRemote(mcp)) return
+
+            const current = s.status[name]?.status
+            if (current === "connected") return
+
+            yield* createAndStore(name, { ...mcp, enabled: true })
+            yield* events.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
+          }),
+        { concurrency: "unbounded" },
+      )
+
+      return yield* status()
     })
 
     const disconnect = Effect.fn("MCP.disconnect")(function* (name: string) {
@@ -1052,6 +1087,7 @@ const layer = Layer.effect(
       finishAuth: finishAuth as Interface["finishAuth"],
       removeAuth: removeAuth as Interface["removeAuth"],
       supportsOAuth: supportsOAuth as Interface["supportsOAuth"],
+      connectKeycloakBearerServers: connectKeycloakBearerServers as Interface["connectKeycloakBearerServers"],
       hasStoredTokens: hasStoredTokens as Interface["hasStoredTokens"],
       getAuthStatus: getAuthStatus as Interface["getAuthStatus"],
     } satisfies Interface)
